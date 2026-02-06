@@ -1,0 +1,32 @@
+{
+  "name": "oncall-triage-dashboard",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "postinstall": "npm rebuild better-sqlite3",
+    "dev": "./scripts/dev.sh",
+    "dev:servers": "concurrently -n web,api -c blue,green \"npm:dev:web\" \"npm:dev:api\"",
+    "dev:web": "npm --workspace apps/web run dev",
+    "dev:api": "npm --workspace apps/api run dev",
+    "build": "npm --workspace apps/web run build && npm --workspace apps/api run build",
+    "start": "npm --workspace apps/web run start",
+    "lint": "npm --workspace apps/web run lint && npm --workspace apps/api run lint",
+    "db:push": "npm --workspace apps/api run db:push",
+    "db:migrate": "npm --workspace apps/api run db:migrate",
+    "db:studio": "npm --workspace apps/api run db:studio",
+    "test:e2e": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.50.1",
+    "concurrently": "^9.0.1"
+  },
+  "dependencies": {
+    "@nestjs/platform-socket.io": "^11.1.13",
+    "@nestjs/websockets": "^11.1.13",
+    "socket.io-client": "^4.8.3"
+  }
+}

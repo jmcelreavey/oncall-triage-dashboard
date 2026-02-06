@@ -1,0 +1,30 @@
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Database files
+*.db
+*.db-journal
+apps/api/.data.db
+
+# Test output
+output/
+playwright-report/
+
+# Logs
+*.log
+tmp/
+
+# Dependencies
+node_modules/
+
+# Build artifacts
+dist/
+.next/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo

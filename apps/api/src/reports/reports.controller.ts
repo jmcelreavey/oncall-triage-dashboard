@@ -1,0 +1,34 @@
+import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { ReportsService } from './reports.service';
+
+@Controller('reports')
+export class ReportsController {
+  constructor(private readonly reports: ReportsService) {}
+
+  @Get()
+  async list() {
+    return this.reports.list();
+  }
+
+  @Get(':id')
+  async get(@Param('id') id: string) {
+    return this.reports.get(id);
+  }
+
+  @Post('open-file')
+  async openFile(
+    @Body()
+    payload: {
+      repoPath?: string;
+      path: string;
+      line?: number;
+    },
+  ) {
+    return this.reports.openFile(payload);
+  }
+
+  @Post('clear')
+  async clear() {
+    return this.reports.clear();
+  }
+}

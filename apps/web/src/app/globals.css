@@ -1,0 +1,115 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: light;
+  --ink: #0f172a;
+  --ink-muted: #334155;
+  --paper: #ffffff;
+  --surface: #f8fafc;
+  --brand: #185f7d;
+  --brand-strong: #0f4f68;
+  --accent: #d14343;
+  --accent-2: var(--brand);
+  --accent-3: #1f8a70;
+  --border: rgba(15, 23, 42, 0.14);
+  --shadow: 0 16px 36px rgba(15, 23, 42, 0.12);
+  --glass: rgba(255, 255, 255, 0.92);
+  --panel: rgba(255, 255, 255, 0.96);
+  --panel-muted: rgba(255, 255, 255, 0.9);
+  --code-bg: #0f172a;
+  --code-text: #e5e7eb;
+  --bg-gradient-1: rgba(24, 95, 125, 0.12);
+  --bg-gradient-2: rgba(0, 0, 0, 0.04);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ink: #f3f5f7;
+  --ink-muted: #9aa4b2;
+  --paper: #0b0f14;
+  --surface: #0f1520;
+  --brand: #3c8fb0;
+  --brand-strong: #5aa7c5;
+  --accent: #f07171;
+  --accent-2: var(--brand);
+  --accent-3: #36b37e;
+  --border: rgba(255, 255, 255, 0.14);
+  --shadow: 0 12px 34px rgba(0, 0, 0, 0.45);
+  --glass: rgba(12, 18, 26, 0.78);
+  --panel: rgba(18, 25, 34, 0.88);
+  --panel-muted: rgba(18, 25, 34, 0.7);
+  --code-bg: #070a10;
+  --code-text: #d7dde4;
+  --bg-gradient-1: rgba(60, 143, 176, 0.22);
+  --bg-gradient-2: rgba(0, 0, 0, 0.45);
+}
+
+@theme inline {
+  --color-background: var(--paper);
+  --color-foreground: var(--ink);
+  --font-sans: var(--font-space);
+  --font-mono: var(--font-mono);
+}
+
+body {
+  background: radial-gradient(1200px 600px at 12% -10%, var(--bg-gradient-1), transparent 65%),
+    radial-gradient(900px 500px at 88% -20%, var(--bg-gradient-2), transparent 70%), var(--surface);
+  color: var(--ink);
+  font-family: var(--font-space), ui-sans-serif, system-ui;
+  min-height: 100vh;
+}
+
+details > summary {
+  list-style: none;
+}
+
+details > summary::-webkit-details-marker {
+  display: none;
+}
+
+details > summary {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+details > summary::before {
+  content: "+";
+  display: inline-block;
+  font-size: 0.75rem;
+  color: var(--ink-muted);
+}
+
+details[open] > summary::before {
+  content: "–";
+}
+
+.glass {
+  background: var(--glass);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(8px);
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+}
+
+.panel-muted {
+  background: var(--panel-muted);
+  border: 1px solid var(--border);
+}
+
+.code-block {
+  background: var(--code-bg);
+  color: var(--code-text);
+}
+
+.chip {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.3rem 0.85rem;
+  font-size: 0.75rem;
+  letter-spacing: 0.02em;
+}

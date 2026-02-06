@@ -1,0 +1,132 @@
+// Prisma schema for oncall-triage-dashboard
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model AlertEvent {
+  id                   String      @id @default(cuid())
+  monitorId            String?
+  monitorName          String
+  monitorState         String
+  priority             Int?
+  monitorUrl           String?
+  monitorMessage       String?
+  monitorQuery         String?
+  monitorTags          Json?
+  overallStateModified DateTime?
+  service              String?
+  environment          String?
+  sourceRepo           String?
+  repoHint             String?
+  repoUrl              String?
+  repoPath             String?
+  githubEnrichment     Json?
+  confluenceEnrichment Json?
+  createdAt            DateTime    @default(now())
+  updatedAt            DateTime    @updatedAt
+  triageRuns           TriageRun[]
+
+  @@index([monitorId])
+  @@index([overallStateModified])
+  @@unique([monitorId, overallStateModified])
+}
+
+model TriageRun {
+  id            String    @id @default(cuid())
+  alertId       String?
+  alert         AlertEvent? @relation(fields: [alertId], references: [id])
+  parentRunId   String?
+  parentRun     TriageRun? @relation("TriageRunParent", fields: [parentRunId], references: [id])
+  childRuns     TriageRun[] @relation("TriageRunParent")
+  status        String
+  provider      String
+  reportMarkdown String?
+  sessionId     String?
+  sessionUrl    String?
+  error         String?
+  evidence      Json?
+  evidenceTimeline Json?
+  fixSuggestions Json?
+  similarIncidents Json?
+  createdAt     DateTime  @default(now())
+  finishedAt    DateTime?
+
+  @@index([status])
+}
+
+model SchedulerState {
+  id            String   @id @default(cuid())
+  name          String   @unique
+  lastRunAt     DateTime?
+  lastSuccessAt DateTime?
+  lastError     String?
+  updatedAt     DateTime @updatedAt
+}
+
+model SchedulerLock {
+  id             String   @id @default(cuid())
+  name           String   @unique
+  ownerId        String
+  leaseExpiresAt DateTime
+  heartbeatAt    DateTime
+  acquiredAt     DateTime
+  updatedAt      DateTime @updatedAt
+}
+
+model IntegrationCheck {
+  id        String   @id @default(cuid())
+  name      String
+  ok        Boolean
+  message   String?
+  checkedAt DateTime @default(now())
+
+  @@index([name])
+}
+
+model AppConfig {
+  id                    String   @id @default("default")
+  datadogApiKey         String?
+  datadogAppKey         String?
+  datadogSite           String?
+  alertTeam             String?
+  githubToken           String?
+  confluenceBaseUrl     String?
+  confluenceUser        String?
+  confluenceToken       String?
+  provider              String?
+  repoRoot              String?
+  opencodeWebUrl        String?
+  codexBin              String?
+  codexModel            String?
+  enrichGithub          Boolean?
+  enrichConfluence      Boolean?
+  autoDiscoverRepos     Boolean  @default(false)
+  autoDiscoverInterval  Int      @default(86400000)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+}
+
+model MonitorRepoMapping {
+  id             String    @id @default(cuid())
+  monitorId      String
+  monitorName    String
+  service        String?
+  namespace      String?
+  repoPath       String
+  repoUrl        String?
+  confidence     Float     @default(0.5)
+  source         String    @default("auto")
+  lastVerifiedAt DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([monitorId])
+  @@index([service])
+  @@index([namespace])
+  @@unique([monitorId, repoPath])
+}

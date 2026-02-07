@@ -1,35 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { BranchSuggestionButton } from "@/components/branch-suggestion-button";
-import { ContinueRunButton } from "@/components/continue-run-button";
 import { OpenCodexButton } from "@/components/open-codex-button";
 import { TriggerRunButton } from "@/components/trigger-run-button";
 import { OpenFileButton } from "@/components/open-file-button";
 import { CopyButton } from "@/components/copy-button";
 import { ClearDataButton } from "@/components/clear-data-button";
-import { RerunButton } from "@/components/rerun-button";
+import { DownloadFilesButton } from "@/components/download-files-button";
 import { ReportSummary } from "@/components/report-summary";
 import { fetchReports } from "@/lib/api";
-
-type Integration = {
-  name: string;
-  configured: boolean;
-  ok: boolean | null;
-  message?: string;
-  checkedAt?: string;
-};
-
-type HealthStatus = {
-  scheduler?: {
-    lastRunAt?: string | null;
-    lastSuccessAt?: string | null;
-    lastError?: string | null;
-    intervalMs?: number;
-    staleThresholdMs?: number;
-    stale?: boolean;
-  };
-};
 
 type Report = {
   id: string;
@@ -180,14 +159,6 @@ function extractSlackMessage(text?: string) {
   return snippet;
 }
 
-function evidenceStats(steps?: EvidenceStep[]) {
-  if (!steps || steps.length === 0) return null;
-  const ok = steps.filter((s) => s.status === "ok").length;
-  const error = steps.filter((s) => s.status === "error").length;
-  const skipped = steps.filter((s) => s.status === "skipped").length;
-  return { ok, error, skipped };
-}
-
 export function ReportsList({
   onRunningChange,
 }: {
@@ -198,6 +169,8 @@ export function ReportsList({
 
   useEffect(() => {
     let eventSource: EventSource | null = null;
+    let reconnectTimeout: NodeJS.Timeout | null = null;
+    let isMounted = true;
     const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
 
     async function loadReports() {
@@ -209,45 +182,58 @@ export function ReportsList({
       }
     }
 
-    loadReports();
+    function connect() {
+      if (!isMounted) return;
 
-    const eventSourceUrl = `${API_URL}/events/stream`;
-    console.log("[ReportsList] Connecting to SSE:", eventSourceUrl);
-    eventSource = new EventSource(eventSourceUrl);
+      const eventSourceUrl = `${API_URL}/events/stream`;
+      console.log("[ReportsList] Connecting to SSE:", eventSourceUrl);
+      eventSource = new EventSource(eventSourceUrl);
 
-    eventSource.onopen = () => {
-      console.log("[ReportsList] SSE connection opened");
-      setConnected(true);
-    };
+      eventSource.onopen = () => {
+        console.log("[ReportsList] SSE connection opened");
+        setConnected(true);
+      };
 
-    eventSource.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (data.type === "initial" || data.type === "update") {
-          const newReports = data.reports || [];
-          console.log(
-            "[ReportsList] Received update, reports count:",
-            newReports.length,
-          );
-          setReports(newReports);
-          const runningReports = newReports.filter(
-            (r: { status?: string }) => r.status === "running",
-          );
-          onRunningChange(runningReports.length > 0, runningReports.length);
+      eventSource.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === "initial" || data.type === "update") {
+            const newReports = data.reports || [];
+            console.log(
+              "[ReportsList] Received update, reports count:",
+              newReports.length,
+            );
+            setReports(newReports);
+            const runningReports = newReports.filter(
+              (r: { status?: string }) => r.status === "running",
+            );
+            onRunningChange(runningReports.length > 0, runningReports.length);
+          }
+        } catch (error) {
+          console.error("[ReportsList] Failed to parse SSE event:", error);
         }
-      } catch (error) {
-        console.error("[ReportsList] Failed to parse SSE event:", error);
-      }
-    };
+      };
 
-    eventSource.onerror = (error) => {
-      console.error("[ReportsList] SSE connection error:", error);
-      setConnected(false);
-      eventSource?.close();
-    };
+      eventSource.onerror = () => {
+        // SSE errors are normal when API restarts or network issues occur
+        console.log("[ReportsList] SSE connection lost, will retry in 5s");
+        setConnected(false);
+        eventSource?.close();
+
+        // Auto-reconnect after 5 seconds
+        if (isMounted) {
+          reconnectTimeout = setTimeout(connect, 5000);
+        }
+      };
+    }
+
+    loadReports();
+    connect();
 
     return () => {
+      isMounted = false;
       console.log("[ReportsList] Cleaning up SSE connection");
+      if (reconnectTimeout) clearTimeout(reconnectTimeout);
       eventSource?.close();
     };
   }, [onRunningChange]);
@@ -305,7 +291,6 @@ export function ReportsList({
             </div>
           )}
           {sortedReports.map((report) => {
-            const stats = evidenceStats(report.evidenceTimeline);
             const slackMessage =
               report.status === "complete"
                 ? extractSlackMessage(report.reportMarkdown)
@@ -355,18 +340,12 @@ export function ReportsList({
                     </div>
                     <p className="mt-1 text-xs text-[var(--ink-muted)]">
                       {report.alert?.service ?? "unknown-service"} ·{" "}
-                      {report.alert?.environment ?? "env?"}
+                      {report.alert?.environment ?? "unknown-env"}
                     </p>
                     <div className="mt-2 flex flex-wrap gap-2">
                       {report.provider && (
                         <span className="chip border-[var(--border)] text-[var(--ink-muted)]">
                           Provider {report.provider}
-                        </span>
-                      )}
-                      {stats && (
-                        <span className="chip border-[var(--border)] text-[var(--ink-muted)]">
-                          Evidence {stats.ok} ok · {stats.error} err ·{" "}
-                          {stats.skipped} skipped
                         </span>
                       )}
                       {report.fixSuggestions &&
@@ -406,9 +385,7 @@ export function ReportsList({
                           : "Open Session"}
                       </a>
                     )}
-                    {isComplete && <BranchSuggestionButton runId={report.id} />}
-                    {!isRunning && <RerunButton runId={report.id} />}
-                    {false && <ContinueRunButton runId={report.id} />}
+                    <DownloadFilesButton runId={report.id} />
                     {slackMessage && (
                       <CopyButton text={slackMessage} label="Copy Slack" />
                     )}
@@ -462,62 +439,6 @@ export function ReportsList({
                     </details>
                   </div>
                 )}
-                {report.evidenceTimeline &&
-                  report.evidenceTimeline.length > 0 && (
-                    <details className="mt-4 rounded-2xl panel-muted p-4">
-                      <summary className="cursor-pointer text-xs font-semibold uppercase tracking-[0.2em] text-[var(--ink-muted)]">
-                        Triage Timeline · {report.evidenceTimeline.length} steps
-                      </summary>
-                      <div className="mt-3 grid gap-2">
-                        {report.evidenceTimeline.map((step) => {
-                          const isOk = step.status === "ok";
-                          const isError = step.status === "error";
-                          return (
-                            <div
-                              key={step.id}
-                              className={`flex flex-wrap items-center justify-between rounded-xl border border-dashed px-3 py-2 text-xs ${
-                                isError
-                                  ? "border-[var(--accent)] bg-[var(--accent)]/5"
-                                  : "border-[var(--border)]"
-                              }`}
-                            >
-                              <div className="flex-1 min-w-0">
-                                <p className="font-semibold text-[var(--ink)] truncate">
-                                  {step.title}
-                                </p>
-                                <p
-                                  className={`text-[0.7rem] ${
-                                    isError
-                                      ? "text-[var(--accent)]"
-                                      : "text-[var(--ink-muted)]"
-                                  }`}
-                                >
-                                  {step.summary}
-                                </p>
-                                {step.artifacts &&
-                                  step.artifacts.length > 0 && (
-                                    <p className="text-[0.65rem] text-[var(--ink-muted)] mt-1">
-                                      Artifacts: {step.artifacts.join(", ")}
-                                    </p>
-                                  )}
-                              </div>
-                              <span
-                                className={`chip ml-3 ${
-                                  isError
-                                    ? "border-[var(--accent)] text-[var(--accent)]"
-                                    : isOk
-                                      ? "border-[var(--accent-3)] text-[var(--accent-3)]"
-                                      : "border-[var(--border)] text-[var(--ink-muted)]"
-                                }`}
-                              >
-                                {step.status}
-                              </span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </details>
-                  )}
 
                 {report.fixSuggestions && report.fixSuggestions.length > 0 && (
                   <details className="mt-4 rounded-2xl panel-muted p-4">

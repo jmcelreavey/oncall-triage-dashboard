@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { mkdir, copyFile } from "fs/promises";
 import path from "path";
 import { PrismaClient } from "@prisma/client";
-import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
+import { PrismaLibSql } from "@prisma/adapter-libsql";
 import { execSync } from "child_process";
 import { existsSync } from "fs";
 
@@ -34,9 +34,8 @@ async function seedReports(): Promise<SeededRuns> {
   await ensureTestDb(dbPath);
   const url = `file:${dbPath}`;
   process.env.DATABASE_URL = url;
-  const prisma = new PrismaClient({
-    adapter: new PrismaBetterSqlite3({ url }),
-  });
+  const adapter = new PrismaLibSql({ url });
+  const prisma = new PrismaClient({ adapter });
 
   await prisma.triageRun.deleteMany();
   await prisma.alertEvent.deleteMany();
@@ -102,6 +101,71 @@ test.beforeAll(async () => {
 });
 
 test("dashboard loads and shows key sections", async ({ page }) => {
+  await page.route("**/reports", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify([
+        {
+          id: seeded.runId,
+          createdAt: new Date().toISOString(),
+          status: "complete",
+          provider: "opencode",
+          sessionUrl: "http://127.0.0.1:4096/session/example",
+          reportMarkdown: "Triage report placeholder.",
+          evidenceTimeline: [
+            {
+              id: "repo-status",
+              title: "Repo status & recent commits",
+              status: "ok",
+              startedAt: new Date().toISOString(),
+              finishedAt: new Date().toISOString(),
+              summary: "Captured last commits.",
+            },
+          ],
+          fixSuggestions: [
+            {
+              title: "PDB minReplicas conflict",
+              summary: "Increase minReplicas to satisfy PDB.",
+              confidence: 0.72,
+              diff: "--- a/k8s/hpa.yaml\\n+++ b/k8s/hpa.yaml\\n@@\\n-minReplicas: 0\\n+minReplicas: 1",
+              files: [
+                { path: "k8s/hpa.yaml", line: 12, text: "minReplicas: 0" },
+              ],
+            },
+          ],
+          alert: {
+            monitorId: "mon-123",
+            monitorName: "Sample Alert: PDB Not Respected",
+            monitorState: "Alert",
+            monitorUrl: "https://app.datadoghq.com/monitors/123",
+            service: "capi-core",
+            environment: "prd",
+            overallStateModified: new Date().toISOString(),
+          },
+        },
+        {
+          id: seeded.codexRunId,
+          createdAt: new Date().toISOString(),
+          status: "complete",
+          provider: "codex",
+          reportMarkdown: "Codex triage report placeholder.",
+          sessionId: "ses_test_123",
+          alert: {
+            monitorId: "mon-123",
+            monitorName: "Sample Alert: PDB Not Respected",
+            monitorState: "Alert",
+            monitorUrl: "https://app.datadoghq.com/monitors/123",
+            service: "capi-core",
+            environment: "prd",
+            overallStateModified: new Date().toISOString(),
+          },
+        },
+      ]),
+    }),
+  );
+
+  await page.goto("/");
   await page.goto("/");
   await expect(page.getByText("Oncall Triage Dashboard")).toBeVisible();
   await expect(page.getByText("Latest Reports")).toBeVisible();
@@ -115,6 +179,72 @@ test("dashboard loads and shows key sections", async ({ page }) => {
 });
 
 test("report actions and connection wizard respond", async ({ page }) => {
+  await page.route("**/reports", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify([
+        {
+          id: seeded.runId,
+          createdAt: new Date().toISOString(),
+          status: "complete",
+          provider: "opencode",
+          sessionUrl: "http://127.0.0.1:4096/session/example",
+          reportMarkdown:
+            "## Summary\nThe FluxCD alert was triggered due to a failing GitRepository resource.\n\n## Root Cause\nThe git credentials expired for the repository.\n\n## Recommended Actions\n- Rotate the git credentials\n- Verify the GitRepository resource status",
+          evidenceTimeline: [
+            {
+              id: "repo-status",
+              title: "Repo status & recent commits",
+              status: "ok",
+              startedAt: new Date().toISOString(),
+              finishedAt: new Date().toISOString(),
+              summary: "Captured last commits.",
+            },
+          ],
+          fixSuggestions: [
+            {
+              title: "PDB minReplicas conflict",
+              summary: "Increase minReplicas to satisfy PDB.",
+              confidence: 0.72,
+              diff: "--- a/k8s/hpa.yaml\\n+++ b/k8s/hpa.yaml\\n@@\\n-minReplicas: 0\\n+minReplicas: 1",
+              files: [
+                { path: "k8s/hpa.yaml", line: 12, text: "minReplicas: 0" },
+              ],
+            },
+          ],
+          alert: {
+            monitorId: "mon-123",
+            monitorName: "Sample Alert: PDB Not Respected",
+            monitorState: "Alert",
+            monitorUrl: "https://app.datadoghq.com/monitors/123",
+            service: "capi-core",
+            environment: "prd",
+            overallStateModified: new Date().toISOString(),
+          },
+        },
+        {
+          id: seeded.codexRunId,
+          createdAt: new Date().toISOString(),
+          status: "complete",
+          provider: "codex",
+          reportMarkdown:
+            "## Summary\nThe Codex alert was triggered due to a failing resource.\n\n## Root Cause\nThe resource configuration was incorrect.\n\n## Recommended Actions\n- Update the configuration\n- Verify the resource status",
+          sessionId: "ses_test_123",
+          alert: {
+            monitorId: "mon-123",
+            monitorName: "Sample Alert: PDB Not Respected",
+            monitorState: "Alert",
+            monitorUrl: "https://app.datadoghq.com/monitors/123",
+            service: "capi-core",
+            environment: "prd",
+            overallStateModified: new Date().toISOString(),
+          },
+        },
+      ]),
+    }),
+  );
+
   await page.route("**/triage/run", (route) =>
     route.fulfill({
       status: 200,
@@ -129,24 +259,7 @@ test("report actions and connection wizard respond", async ({ page }) => {
       body: JSON.stringify({ queued: true, runId: "queued-continue" }),
     }),
   );
-  await page.route(`**/triage/rerun/${seeded.runId}`, (route) =>
-    route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ queued: true, runId: "queued-rerun" }),
-    }),
-  );
-  await page.route(`**/triage/suggest-branch/${seeded.runId}`, (route) =>
-    route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        branchName: "codex/fix-pdb",
-        commands: ["git checkout -b codex/fix-pdb"],
-        files: ["k8s/capi-core/hpa.yaml"],
-      }),
-    }),
-  );
+
   await page.route(`**/triage/open-codex/${seeded.codexRunId}`, (route) =>
     route.fulfill({
       status: 200,
@@ -199,23 +312,9 @@ test("report actions and connection wizard respond", async ({ page }) => {
     page.getByText("Queued. Check Latest Reports in a moment."),
   ).toBeVisible();
 
-  await page.getByTestId(`suggest-branch-${seeded.runId}`).click();
-  await expect(page.getByText("codex/fix-pdb", { exact: true })).toBeVisible();
-
-  await page.getByTestId(`rerun-run-${seeded.runId}`).click();
-  await expect(
-    page.getByText("Queued. Check Latest Reports in a moment."),
-  ).toBeVisible();
-
-  await page.getByTestId(`continue-run-${seeded.runId}`).click();
-  await expect(
-    page.getByText("Queued. Check Latest Reports in a moment."),
-  ).toBeVisible();
-
   await page.getByTestId(`open-codex-${seeded.codexRunId}`).click();
   await expect(page.getByText("Opened Codex session.")).toBeVisible();
 
-  await expect(page.getByText("Triage Timeline")).toBeVisible();
   await page.getByText("Draft Fix Suggestions").click();
   await expect(page.getByText("PDB minReplicas conflict")).toBeVisible();
   await expect(page.getByText("Open File").first()).toBeVisible();
@@ -223,9 +322,9 @@ test("report actions and connection wizard respond", async ({ page }) => {
 
   await page.getByTestId("open-connection-wizard").click();
   await expect(page.getByTestId("connection-wizard-modal")).toBeVisible();
-  await page.getByPlaceholder("DATADOG_API_KEY").fill("dd-api-key");
+  await page.getByPlaceholder("API Key").fill("dd-api-key");
   await page.getByTestId("connection-wizard-save").click();
   await expect(
-    page.getByText("Saved. You may need to restart the API for full effect."),
+    page.getByText("Saved. Configuration is now active."),
   ).toBeVisible();
 });

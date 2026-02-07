@@ -2,10 +2,9 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { existsSync, readdirSync } from 'fs';
 import { join } from 'path';
-import { env, envBool, envNumber } from '../config/env';
+import { env, envBool } from '../config/env';
 import {
   extractRepoNameFromMonitorName,
-  guessGitHubRepoPath,
   buildRepoUrlFromPath,
 } from '../triage/utils';
 

@@ -14,8 +14,6 @@ export interface AlertContext {
   repoHint?: string;
   repoUrl?: string;
   repoPath?: string;
-  githubEnrichment?: any;
-  confluenceEnrichment?: any;
 }
 
 export interface ProviderResult {

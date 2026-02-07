@@ -1,6 +1,24 @@
-import { spawn } from 'child_process';
+import { spawn, execFile } from 'child_process';
+import { promisify } from 'util';
 import { basename } from 'path';
+import { homedir } from 'os';
+import * as fs from 'fs/promises';
 import { ProviderResult, TriageProvider } from '../types';
+
+const execFileAsync = promisify(execFile);
+
+interface Message {
+  role: string;
+  content: string;
+  timestamp?: number;
+}
+
+interface OpenCodeSession {
+  id: string;
+  title: string;
+  directory: string;
+  messages?: Message[];
+}
 
 function encodeRepoPath(path: string) {
   return Buffer.from(path).toString('base64url');
@@ -25,10 +43,20 @@ function isOpenCodeMetadata(type?: string): boolean {
 function extractTextFromObj(obj: any): string | null {
   if (!obj) return null;
 
-  // Skip metadata objects
+  // Skip metadata objects first
   if (isOpenCodeMetadata(obj?.type)) return null;
 
-  // Extract text from known locations
+  // Handle OpenCode streaming response format (text nested in part) - PRIORITY 1
+  if (obj?.part?.type === 'text' && typeof obj?.part?.text === 'string') {
+    return obj.part.text;
+  }
+
+  // Direct top-level text (format variation) - PRIORITY 2
+  if (obj?.type === 'text' && typeof obj?.text === 'string') {
+    return obj.text;
+  }
+
+  // Extract text from known locations (fallback formats)
   if (obj?.role === 'assistant' && typeof obj?.content === 'string') {
     return obj.content;
   }
@@ -41,9 +69,6 @@ function extractTextFromObj(obj: any): string | null {
   if (obj?.type === 'assistant_message' && typeof obj?.content === 'string') {
     return obj.content;
   }
-  if (obj?.type === 'text' && typeof obj?.text === 'string') {
-    return obj.text;
-  }
   if (
     obj?.type === 'content_block_delta' &&
     typeof obj?.delta?.text === 'string'
@@ -51,9 +76,26 @@ function extractTextFromObj(obj: any): string | null {
     return obj.delta.text;
   }
 
-  // Handle OpenCode streaming response format (text nested in part)
-  if (obj?.part?.type === 'text' && typeof obj?.part?.text === 'string') {
-    return obj.part.text;
+  // Additional fallback: check for text in nested content_block
+  if (
+    obj?.type === 'content_block' &&
+    typeof obj?.content?.[0]?.text === 'string'
+  ) {
+    return obj.content[0].text;
+  }
+
+  // Debug: log objects that don't match known patterns (helps identify new formats)
+  if (obj?.type && typeof obj.type === 'string' && obj.type !== 'text') {
+    const keys = Object.keys(obj).slice(0, 5).join(', ');
+    if (
+      !['step_start', 'step_finish', 'run_start', 'run_finish'].includes(
+        obj.type,
+      )
+    ) {
+      console.log(
+        `[extractTextFromObj] Unknown type "${obj.type}" with keys: ${keys}`,
+      );
+    }
   }
 
   return null;
@@ -63,6 +105,9 @@ function parseJsonLines(output: string) {
   const lines = output.split('\n');
   let sessionId: string | undefined;
   const assistantParts: string[] = [];
+  let linesParsed = 0;
+  let linesWithText = 0;
+  const debugSample: string[] = []; // Store first few parsed objects for debugging
 
   for (const line of lines) {
     const trimmed = line.trim();
@@ -73,6 +118,7 @@ function parseJsonLines(output: string) {
     } catch {
       continue;
     }
+    linesParsed++;
 
     // Extract session ID from various possible locations (check before skipping metadata)
     if (!sessionId) {
@@ -89,12 +135,28 @@ function parseJsonLines(output: string) {
     const text = extractTextFromObj(obj);
     if (text) {
       assistantParts.push(text);
+      linesWithText++;
+      // Log first few text extractions for debugging
+      if (assistantParts.length <= 3) {
+        debugSample.push(
+          `Part ${assistantParts.length}: ${text.slice(0, 100)}...`,
+        );
+      }
     }
   }
 
   // If we found incremental parts, join them; otherwise return undefined
   const assistantText =
     assistantParts.length > 0 ? assistantParts.join('') : undefined;
+
+  console.log(
+    `[parseJsonLines] Parsed ${linesParsed} JSON lines, found text in ${linesWithText} lines, total chars: ${assistantText?.length ?? 0}`,
+  );
+
+  // Debug: show sample of extracted parts
+  if (debugSample.length > 0) {
+    console.log(`[parseJsonLines] Sample parts: ${debugSample.join(' | ')}`);
+  }
 
   return { sessionId, assistantText };
 }
@@ -117,11 +179,22 @@ export class OpenCodeProvider implements TriageProvider {
     const title = `Triage ${basename(workingDir)} ${new Date().toISOString()}`;
     const timeoutMs = Number(process.env.TRIAGE_PROVIDER_TIMEOUT_MS ?? 600_000);
 
+    const reportFilePath = `${workingDir}/.opencode-report-${runId}.txt`;
+    const augmentedPrompt = `${prompt}\n\nIMPORTANT: At the end of your investigation, write your final report to the file ${reportFilePath} using the Write tool. This report should include your diagnosis, findings, and recommended actions.`;
+
     console.log(
       `[${runId}] OpenCode provider timeout set to ${timeoutMs}ms (${timeoutMs / 1000}s)`,
     );
 
-    const args = ['run', '--format', 'json', '--title', title];
+    const args = ['run', '--format', 'json', '--print-logs', '--title', title];
+
+    // NOTE: Do NOT use --agent general here. The 'general' agent is a subagent
+    // and cannot be used with `opencode run` (it warns and falls back to default).
+    // Instead, permissions must be configured in the global OpenCode config at
+    // ~/.config/opencode/opencode.json with:
+    //   "permission": { "external_directory": "allow", "doom_loop": "allow", "read": "allow", ... }
+    // The integrations service checks for this and the dashboard flags when it's missing.
+
     if (this.model) {
       args.push('--model', this.model);
     }
@@ -129,16 +202,22 @@ export class OpenCodeProvider implements TriageProvider {
       args.push('--variant', this.variant);
     }
 
+    // Use --attach to connect to a running OpenCode web server when available.
+    // This avoids the "Session not found" error that occurs when `opencode run`
+    // tries to start its own server alongside an already-running instance.
+    // --attach creates a NEW session on the existing server, so no pre-existing
+    // session is needed.
     const attachUrl = process.env.OPENCODE_WEB_URL;
     if (attachUrl) {
       args.push('--attach', attachUrl);
+      console.log(`[${runId}] Using --attach mode with server at ${attachUrl}`);
     }
 
     if (attachments.length > 0) {
       args.push('--file', ...attachments);
     }
 
-    args.push('--', prompt);
+    args.push('--', augmentedPrompt);
 
     console.log(
       `[${runId}] Starting OpenCode process: ${this.bin} ${args.slice(0, 5).join(' ')}...`,
@@ -207,7 +286,12 @@ export class OpenCodeProvider implements TriageProvider {
       child.stderr.on('data', (chunk) => {
         const text = chunk.toString().trim();
         if (text) {
-          console.log(`[${runId}] OpenCode stderr: ${text.slice(0, 200)}`);
+          const shouldLog = !text.includes(
+            'service=bus type=message.part.updated',
+          );
+          if (shouldLog) {
+            console.log(`[${runId}] OpenCode stderr: ${text.slice(0, 200)}`);
+          }
         }
         stderrChunks.push(Buffer.from(chunk));
       });
@@ -243,6 +327,16 @@ export class OpenCodeProvider implements TriageProvider {
     });
 
     const stdout = Buffer.concat(stdoutChunks).toString();
+
+    console.log(`[${runId}] OpenCode stdout size: ${stdout.length} chars`);
+    if (stdout.length > 0 && stdout.length < 500) {
+      console.log(`[${runId}] Raw stdout preview: ${stdout}`);
+    } else if (stdout.length > 0) {
+      // Show first 5 JSON lines for debugging large outputs
+      const firstLines = stdout.split('\n').slice(0, 5).join('\n');
+      console.log(`[${runId}] First 5 JSON lines:\n${firstLines}`);
+    }
+
     const { sessionId, assistantText } = parseJsonLines(stdout);
 
     const webBase = process.env.OPENCODE_WEB_URL || '';
@@ -254,23 +348,50 @@ export class OpenCodeProvider implements TriageProvider {
     );
     console.log(`[${runId}] Working directory: ${workingDir}`);
 
+    // Query the actual session directory that OpenCode used (it may differ from workingDir)
+    let actualDirectory = workingDir;
+    if (sessionId) {
+      try {
+        const { stdout: sessionJson } = await execFileAsync(
+          this.bin,
+          ['session', 'list', '--format', 'json'],
+          { timeout: 5000 },
+        );
+        const sessions = JSON.parse(sessionJson);
+        const session = sessions.find((s: any) => s.id === sessionId);
+        if (session?.directory) {
+          actualDirectory = session.directory;
+          console.log(
+            `[${runId}] OpenCode session actual directory: ${actualDirectory}`,
+          );
+        }
+      } catch (error) {
+        console.log(
+          `[${runId}] Warning: Could not query session directory: ${error}`,
+        );
+      }
+    }
+
     const sessionUrl =
       sessionId && webBase
-        ? `${webBase.replace(/\/$/, '')}/${encodeRepoPath(workingDir)}/session/${sessionId}`
+        ? `${webBase.replace(/\/$/, '')}/${encodeRepoPath(actualDirectory)}/session/${sessionId}`
         : undefined;
 
     console.log(
       `[${runId}] Generated sessionUrl: ${sessionUrl ?? '(not generated)'}`,
     );
 
-    // If structured parsing didn't find assistant text, try to extract
-    // readable content from the raw JSON output as a fallback
     let report = assistantText;
     if (!report && stdout) {
+      console.log(
+        `[${runId}] No assistantText found, trying fallback extraction...`,
+      );
       const fallbackParts: string[] = [];
       for (const line of stdout.split('\n')) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
         try {
-          const obj = JSON.parse(line.trim());
+          const obj = JSON.parse(trimmed);
           const text = extractTextFromObj(obj);
           if (text && text.length > 20) {
             fallbackParts.push(text);
@@ -279,12 +400,42 @@ export class OpenCodeProvider implements TriageProvider {
           // Not JSON, skip
         }
       }
+      console.log(
+        `[${runId}] Fallback extraction found ${fallbackParts.length} parts`,
+      );
       report = fallbackParts.length > 0 ? fallbackParts.join('\n\n') : '';
     }
 
     console.log(
-      `[${runId}] Parsed report: ${report?.length ?? 0} chars, sessionId: ${sessionId ?? '(none)'}`,
+      `[${runId}] Final report: ${report?.length ?? 0} chars, sessionId: ${sessionId ?? '(none)'}`,
     );
+
+    // Try reading the report file that OpenCode should have written
+    try {
+      await fs.access(reportFilePath);
+      const fileContent = await fs.readFile(reportFilePath, 'utf-8');
+      const currentLength = report?.length ?? 0;
+      if (fileContent.length > currentLength) {
+        console.log(
+          `[${runId}] Using report from file: ${fileContent.length} chars (vs stdout ${currentLength})`,
+        );
+        report = fileContent;
+        await fs.unlink(reportFilePath);
+      } else {
+        console.log(
+          `[${runId}] Report file exists but is shorter (${fileContent.length}) than stdout (${currentLength}), ignoring`,
+        );
+        console.log(
+          `[${runId}] Report file content: ${fileContent.substring(0, 200)}...`,
+        );
+      }
+    } catch (error: any) {
+      if (error.code === 'ENOENT') {
+        console.log(`[${runId}] Report file not found at ${reportFilePath}`);
+      } else {
+        console.log(`[${runId}] Failed to read report file: ${error}`);
+      }
+    }
 
     return {
       reportMarkdown: report || 'No response received from OpenCode.',

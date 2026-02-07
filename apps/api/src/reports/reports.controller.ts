@@ -16,7 +16,7 @@ export class ReportsController {
   }
 
   @Post('open-file')
-  async openFile(
+  openFile(
     @Body()
     payload: {
       repoPath?: string;
@@ -30,5 +30,15 @@ export class ReportsController {
   @Post('clear')
   async clear() {
     return this.reports.clear();
+  }
+
+  @Get(':id/download')
+  async downloadFiles(@Param('id') id: string) {
+    return this.reports.downloadFiles(id);
+  }
+
+  @Get(':id/inputs')
+  async getRunInputs(@Param('id') id: string) {
+    return this.reports.getRunInputs(id);
   }
 }

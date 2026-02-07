@@ -185,7 +185,7 @@ export function extractRepoNameFromMonitorName(
 
   const words = monitorName
     .toLowerCase()
-    .split(/[\s\-\[\]]+/)
+    .split(/[\s\-[\]]+/)
     .filter(
       (w) =>
         w.length > 2 &&

@@ -4,7 +4,13 @@ import { useEffect, useState } from "react";
 import { ConnectionWizard } from "@/components/connection-wizard";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { ReportsList } from "@/components/reports-list";
-import { fetchConfig, fetchHealth, fetchIntegrations } from "@/lib/api";
+import {
+  fetchConfig,
+  fetchHealth,
+  fetchIntegrations,
+  fetchPermissions,
+  fixPermissions,
+} from "@/lib/api";
 
 type Integration = {
   name: string;
@@ -32,6 +38,13 @@ type Config = {
   confluenceBaseUrl?: string;
   confluenceUser?: string;
   confluenceToken?: string;
+};
+
+type PermissionCheck = {
+  provider: string;
+  ok: boolean;
+  issues: Array<{ key: string; message: string; severity: "error" | "warn" }>;
+  fixAvailable: boolean;
 };
 
 function formatDate(value: string) {
@@ -64,23 +77,38 @@ export default function Home() {
   const [config, setConfig] = useState<Config | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [runningCount, setRunningCount] = useState(0);
+  const [permCheck, setPermCheck] = useState<PermissionCheck | null>(null);
+  const [fixingPerms, setFixingPerms] = useState(false);
+  const [permDismissed, setPermDismissed] = useState(false);
 
   useEffect(() => {
     async function loadData() {
       try {
-        const [integrationsData, healthData, configData] = await Promise.all([
-          fetchIntegrations(),
-          fetchHealth(),
-          fetchConfig(),
-        ]);
+        const [integrationsData, healthData, configData, permData] =
+          await Promise.all([
+            fetchIntegrations(),
+            fetchHealth(),
+            fetchConfig(),
+            fetchPermissions(),
+          ]);
         setIntegrations(integrationsData as Integration[]);
         setHealth(healthData as HealthStatus | null);
         setConfig(configData as Config | null);
+        setPermCheck(permData as PermissionCheck | null);
       } catch (error) {
         console.error("[Home] Failed to load data:", error);
       }
     }
     loadData();
+
+    // Poll health every 10 seconds to keep scheduler status fresh
+    const interval = setInterval(() => {
+      fetchHealth()
+        .then((data) => setHealth(data as HealthStatus | null))
+        .catch(console.error);
+    }, 10000);
+
+    return () => clearInterval(interval);
   }, []);
 
   const scheduler = health?.scheduler;
@@ -106,6 +134,24 @@ export default function Home() {
     missing.length === 0 ? "Ready" : `Needs ${missing.join(" + ")}`;
   const configureTone = missing.length === 0 ? "ok" : "warn";
 
+  async function handleFixPermissions() {
+    setFixingPerms(true);
+    try {
+      const result = await fixPermissions();
+      if (result?.ok) {
+        // Re-check permissions after fix
+        const updated = await fetchPermissions();
+        setPermCheck(updated as PermissionCheck | null);
+      }
+    } catch (error) {
+      console.error("[Home] Failed to fix permissions:", error);
+    } finally {
+      setFixingPerms(false);
+    }
+  }
+
+  const showPermWarning = permCheck && !permCheck.ok && !permDismissed;
+
   return (
     <div className="min-h-screen px-6 py-10">
       {isRunning && (
@@ -116,6 +162,57 @@ export default function Home() {
           </span>
         </div>
       )}
+
+      {showPermWarning && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 max-w-2xl w-full mx-auto">
+          <div className="glass border border-[var(--accent)] rounded-xl px-5 py-4 shadow-lg">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex-1">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="chip border-[var(--accent)] text-[var(--accent)]">
+                    Permission Issue
+                  </span>
+                  <span className="text-xs text-[var(--ink-muted)]">
+                    {permCheck.provider}
+                  </span>
+                </div>
+                <p className="text-sm text-[var(--ink-muted)] mt-1">
+                  {permCheck.provider === "opencode"
+                    ? "OpenCode headless permissions are not configured. Triage runs will fail because the agent cannot execute tools without approval prompts."
+                    : (permCheck.issues[0]?.message ??
+                      "Provider permission issue detected.")}
+                </p>
+                {permCheck.issues.map((issue) => (
+                  <p
+                    key={issue.key}
+                    className="text-xs text-[var(--ink-muted)] mt-1 font-mono opacity-70"
+                  >
+                    {issue.message}
+                  </p>
+                ))}
+              </div>
+              <div className="flex flex-col gap-2 shrink-0">
+                {permCheck.fixAvailable && (
+                  <button
+                    onClick={handleFixPermissions}
+                    disabled={fixingPerms}
+                    className="chip border-[var(--accent-3)] text-[var(--accent-3)] hover:bg-[var(--accent-3)] hover:text-white transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    {fixingPerms ? "Fixing..." : "Fix Now"}
+                  </button>
+                )}
+                <button
+                  onClick={() => setPermDismissed(true)}
+                  className="chip border-[var(--border)] text-[var(--ink-muted)] hover:text-[var(--ink)] transition-colors cursor-pointer"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-10">
         <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>

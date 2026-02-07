@@ -12,7 +12,7 @@ export class EventsController {
   }
 
   @Get('stream')
-  async stream(@Res() res: Response) {
+  stream(@Res() res: Response) {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
@@ -43,31 +43,32 @@ export class EventsController {
     });
   }
 
-  private async startPolling() {
-    setInterval(async () => {
-      const reports = await this.prisma.triageRun.findMany({
-        include: {
-          alert: {
-            select: {
-              monitorName: true,
-              monitorState: true,
-              priority: true,
-              monitorUrl: true,
-              service: true,
-              environment: true,
-              overallStateModified: true,
+  private startPolling() {
+    void setInterval(async () => {
+      try {
+        const reports = await this.prisma.triageRun.findMany({
+          include: {
+            alert: {
+              select: {
+                monitorName: true,
+                monitorState: true,
+                priority: true,
+                monitorUrl: true,
+                service: true,
+                environment: true,
+                overallStateModified: true,
+                repoPath: true,
+              },
             },
           },
-        },
-        orderBy: { createdAt: 'desc' },
-        take: 20,
-      });
+          orderBy: { createdAt: 'desc' },
+          take: 20,
+        });
 
-      const changed = this.reportsChanged(this.lastReports, reports);
+        if (!this.reportsChanged(this.lastReports, reports)) return;
 
-      if (changed) {
         this.lastReports = reports;
-        const data = `data: ${JSON.stringify({ type: 'update', reports })}\n\n`;
+        const data = `data: ${JSON.stringify({ type: 'update', reports, timestamp: new Date().toISOString() })}\n\n`;
 
         for (const client of this.clients) {
           try {
@@ -76,6 +77,8 @@ export class EventsController {
             // Client disconnected, will be cleaned up on close event
           }
         }
+      } catch (error) {
+        console.error('[EventsController] Polling error:', error);
       }
     }, 1000);
   }
@@ -84,8 +87,16 @@ export class EventsController {
     if (oldReports.length !== newReports.length) return true;
 
     for (let i = 0; i < oldReports.length; i++) {
-      const old = oldReports[i];
-      const newR = newReports[i];
+      const old = oldReports[i] as {
+        id: string;
+        status?: string | null;
+        finishedAt?: Date | null;
+      };
+      const newR = newReports[i] as {
+        id: string;
+        status?: string | null;
+        finishedAt?: Date | null;
+      };
 
       if (old.id !== newR.id) return true;
       if (old.status !== newR.status) return true;

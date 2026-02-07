@@ -1,6 +1,6 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
-import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3';
+import { PrismaLibSql } from '@prisma/adapter-libsql';
 
 @Injectable()
 export class PrismaService
@@ -9,12 +9,23 @@ export class PrismaService
 {
   constructor() {
     const url = process.env.DATABASE_URL ?? 'file:./dev.db';
-    const adapter = new PrismaBetterSqlite3({ url });
-    super({ adapter });
+
+    const adapter = new PrismaLibSql({
+      url,
+      intMode: 'number',
+    });
+
+    super({
+      adapter,
+      log: ['error', 'warn'],
+    });
   }
 
   async onModuleInit() {
     await this.$connect();
+    await this.$executeRawUnsafe('PRAGMA journal_mode = WAL;');
+    await this.$executeRawUnsafe('PRAGMA synchronous = NORMAL;');
+    await this.$executeRawUnsafe('PRAGMA wal_autocheckpoint = 0;');
   }
 
   async onModuleDestroy() {

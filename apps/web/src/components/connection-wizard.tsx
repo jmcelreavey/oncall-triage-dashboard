@@ -122,7 +122,7 @@ export function ConnectionWizard({
           setMessage(data.error ?? "Failed to save configuration.");
           return;
         }
-        setMessage("Saved. You may need to restart the API for full effect.");
+        setMessage("Saved. Configuration is now active.");
         router.refresh();
       } catch {
         setMessage("Failed to save configuration.");

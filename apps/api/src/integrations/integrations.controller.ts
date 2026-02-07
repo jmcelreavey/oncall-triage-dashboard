@@ -12,7 +12,7 @@ export class IntegrationsController {
   }
 
   @Get('config')
-  async config() {
+  config() {
     return this.integrations.getConfig();
   }
 

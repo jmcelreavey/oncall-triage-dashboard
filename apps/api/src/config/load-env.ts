@@ -2,19 +2,16 @@ import { config } from 'dotenv';
 import { resolve } from 'path';
 import { existsSync } from 'fs';
 
-const candidates = [
-  resolve(process.cwd(), '.env'),
-  resolve(process.cwd(), '../.env'),
-  resolve(__dirname, '../.env'),
-  resolve(__dirname, '../../.env'),
-  resolve(__dirname, '../../../.env'),
-  resolve(__dirname, '../../../../.env'),
-  resolve(__dirname, '../../../../../.env'),
-];
+// Load from project root .env only (single source of truth)
+let rootEnv = resolve(process.cwd(), '../../.env');
 
-for (const candidate of candidates) {
-  if (existsSync(candidate)) {
-    console.log(`[config] Loading environment from: ${candidate}`);
-    config({ path: candidate, override: false });
-  }
+if (!existsSync(rootEnv)) {
+  rootEnv = resolve(process.cwd(), '.env');
+}
+
+if (existsSync(rootEnv)) {
+  console.log(`[config] Loading environment from: ${rootEnv}`);
+  config({ path: rootEnv });
+} else {
+  console.warn(`[config] No .env file found`);
 }

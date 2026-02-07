@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { env } from '../config/env';
-import { existsSync } from 'fs';
+import { existsSync, readdirSync, readFileSync } from 'fs';
 import path from 'path';
 import { spawnSync } from 'child_process';
 
@@ -42,7 +42,7 @@ export class ReportsService {
     });
   }
 
-  async openFile(payload: { repoPath?: string; path: string; line?: number }) {
+  openFile(payload: { repoPath?: string; path: string; line?: number }) {
     const repoRoot = payload.repoPath ?? this.resolveRepoRoot();
     const resolvedRepo = path.resolve(repoRoot);
     const target = path.isAbsolute(payload.path)
@@ -92,5 +92,101 @@ export class ReportsService {
     await this.prisma.triageRun.deleteMany();
     await this.prisma.alertEvent.deleteMany();
     return { ok: true };
+  }
+
+  async downloadFiles(id: string) {
+    const run = await this.prisma.triageRun.findUnique({
+      where: { id },
+      select: { workingDir: true, createdAt: true },
+    });
+
+    if (!run?.workingDir) {
+      return { error: 'Working directory not found for this run.' };
+    }
+
+    if (!existsSync(run.workingDir)) {
+      return { error: 'Working directory no longer exists.' };
+    }
+
+    const files: Array<{
+      name: string;
+      path: string;
+      content?: string;
+      size: number;
+    }> = [];
+
+    try {
+      const entries = readdirSync(run.workingDir, { withFileTypes: true });
+
+      for (const entry of entries) {
+        if (entry.isFile()) {
+          const filePath = path.join(run.workingDir, entry.name);
+          const stats = existsSync(filePath) ? readFileSync(filePath) : '';
+
+          const maxSize = 100 * 1024;
+          const shouldIncludeContent = stats.length <= maxSize;
+
+          files.push({
+            name: entry.name,
+            path: filePath,
+            content: shouldIncludeContent ? stats.toString() : undefined,
+            size: stats.length,
+          });
+        }
+      }
+    } catch (error) {
+      return { error: `Failed to read working directory: ${String(error)}` };
+    }
+
+    return { runId: id, workingDir: run.workingDir, files };
+  }
+
+  async getRunInputs(id: string) {
+    const runsDir =
+      env('RUNS_DIR') ?? path.resolve(process.cwd(), 'data', 'runs');
+    const runDir = path.join(runsDir, id);
+
+    if (!existsSync(runDir)) {
+      return { error: 'Run directory not found.' };
+    }
+
+    const readFileIfExists = (name: string): string | null => {
+      const filePath = path.join(runDir, name);
+      if (!existsSync(filePath)) return null;
+      try {
+        return readFileSync(filePath, 'utf-8');
+      } catch {
+        return null;
+      }
+    };
+
+    const prompt = readFileIfExists('prompt.txt');
+    const alertJson = readFileIfExists('alert.json');
+    const evidenceJson = readFileIfExists('evidence.json');
+    const previousReport = readFileIfExists('previous_report.md');
+
+    const files: Array<{ name: string; size: number }> = [];
+    try {
+      const entries = readdirSync(runDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isFile()) {
+          const filePath = path.join(runDir, entry.name);
+          const buf = readFileSync(filePath);
+          files.push({ name: entry.name, size: buf.length });
+        }
+      }
+    } catch {
+      // ignore read errors for the file listing
+    }
+
+    return {
+      runId: id,
+      runDir,
+      prompt,
+      alertContext: alertJson ? JSON.parse(alertJson) : null,
+      evidence: evidenceJson ? JSON.parse(evidenceJson) : null,
+      previousReport,
+      files,
+    };
   }
 }

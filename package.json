@@ -7,8 +7,8 @@
     "packages/*"
   ],
   "scripts": {
-    "postinstall": "npm rebuild better-sqlite3",
     "dev": "./scripts/dev.sh",
+    "dev:stop": "./scripts/stop-dev.sh",
     "dev:servers": "concurrently -n web,api -c blue,green \"npm:dev:web\" \"npm:dev:api\"",
     "dev:web": "npm --workspace apps/web run dev",
     "dev:api": "npm --workspace apps/api run dev",
@@ -23,10 +23,5 @@
   "devDependencies": {
     "@playwright/test": "^1.50.1",
     "concurrently": "^9.0.1"
-  },
-  "dependencies": {
-    "@nestjs/platform-socket.io": "^11.1.13",
-    "@nestjs/websockets": "^11.1.13",
-    "socket.io-client": "^4.8.3"
   }
 }

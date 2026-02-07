@@ -189,8 +189,6 @@ export class IntegrationsService {
       opencodeWebUrl: env('OPENCODE_WEB_URL') ?? '',
       codexBin: this.resolveCodexBin(),
       codexModel: env('CODEX_MODEL') ?? 'gpt-5.2-codex',
-      enrichGithub: env('ENRICH_GITHUB') !== 'false',
-      enrichConfluence: env('ENRICH_CONFLUENCE') !== 'false',
     };
   }
 
@@ -510,12 +508,6 @@ export class IntegrationsService {
     if (Object.prototype.hasOwnProperty.call(payload, 'codexModel')) {
       updates.CODEX_MODEL = payload.codexModel ?? '';
     }
-    if (Object.prototype.hasOwnProperty.call(payload, 'enrichGithub')) {
-      updates.ENRICH_GITHUB = payload.enrichGithub ? 'true' : 'false';
-    }
-    if (Object.prototype.hasOwnProperty.call(payload, 'enrichConfluence')) {
-      updates.ENRICH_CONFLUENCE = payload.enrichConfluence ? 'true' : 'false';
-    }
 
     await this.updateEnvFile(rootEnv, updates);
     await this.updateEnvFile(apiEnv, updates);
@@ -527,6 +519,41 @@ export class IntegrationsService {
     for (const [key, value] of Object.entries(updates)) {
       if (value !== undefined) process.env[key] = value;
     }
+
+    await this.prisma.appConfig.upsert({
+      where: { id: 'default' },
+      update: {
+        datadogApiKey: updates.DATADOG_API_KEY,
+        datadogAppKey: updates.DATADOG_APP_KEY,
+        datadogSite: updates.DATADOG_SITE,
+        alertTeam: updates.ALERT_TEAM,
+        githubToken: updates.GITHUB_TOKEN,
+        confluenceBaseUrl: updates.CONFLUENCE_BASE_URL,
+        confluenceUser: updates.ATLASSIAN_USER,
+        confluenceToken: updates.ATLASSIAN_TOKEN,
+        provider: updates.PROVIDER,
+        repoRoot: updates.REPO_ROOT,
+        opencodeWebUrl: updates.OPENCODE_WEB_URL,
+        codexBin: updates.CODEX_BIN,
+        codexModel: updates.CODEX_MODEL,
+      },
+      create: {
+        id: 'default',
+        datadogApiKey: updates.DATADOG_API_KEY,
+        datadogAppKey: updates.DATADOG_APP_KEY,
+        datadogSite: updates.DATADOG_SITE,
+        alertTeam: updates.ALERT_TEAM,
+        githubToken: updates.GITHUB_TOKEN,
+        confluenceBaseUrl: updates.CONFLUENCE_BASE_URL,
+        confluenceUser: updates.ATLASSIAN_USER,
+        confluenceToken: updates.ATLASSIAN_TOKEN,
+        provider: updates.PROVIDER,
+        repoRoot: updates.REPO_ROOT,
+        opencodeWebUrl: updates.OPENCODE_WEB_URL,
+        codexBin: updates.CODEX_BIN,
+        codexModel: updates.CODEX_MODEL,
+      },
+    });
 
     return { ok: true };
   }

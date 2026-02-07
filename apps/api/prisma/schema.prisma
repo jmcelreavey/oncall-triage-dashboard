@@ -40,9 +40,6 @@ model TriageRun {
   id            String    @id @default(cuid())
   alertId       String?
   alert         AlertEvent? @relation(fields: [alertId], references: [id])
-  parentRunId   String?
-  parentRun     TriageRun? @relation("TriageRunParent", fields: [parentRunId], references: [id])
-  childRuns     TriageRun[] @relation("TriageRunParent")
   status        String
   provider      String
   reportMarkdown String?
@@ -53,6 +50,7 @@ model TriageRun {
   evidenceTimeline Json?
   fixSuggestions Json?
   similarIncidents Json?
+  workingDir    String?
   createdAt     DateTime  @default(now())
   finishedAt    DateTime?
 

@@ -27,9 +27,9 @@ test("Connection Wizard shows consolidated Atlassian section", async ({
 
   // Layout is vertical stacked sections, not side-by-side
   await expect(page.getByText("Atlassian (Confluence & JIRA)")).toBeVisible();
-  await expect(page.getByText("Datadog")).toBeVisible();
-  await expect(page.getByText("Provider")).toBeVisible();
-  await expect(page.getByText("GitHub")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Datadog" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Provider" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "GitHub" })).toBeVisible();
 
   // No separate JIRA section or JIRA_BASE_URL field
   await expect(page.getByText("JIRA (optional)")).not.toBeVisible();
@@ -100,14 +100,20 @@ test("Report card renders readable summary, not raw JSON", async ({ page }) => {
   await page.goto("/");
 
   // Summary should be rendered as readable text, not raw JSON
-  await expect(page.getByText("The FluxCD alert was triggered")).toBeVisible();
-  await expect(page.getByText("Root Cause")).toBeVisible();
+  await expect(
+    page
+      .getByText(
+        "The FluxCD alert was triggered due to a failing GitRepository resource.",
+      )
+      .first(),
+  ).toBeVisible();
+  await expect(page.getByText("Root Cause").first()).toBeVisible();
 
   // Open in OpenCode button should be visible
-  await expect(page.getByText("Open in OpenCode")).toBeVisible();
+  await expect(page.getByText("Open in OpenCode").first()).toBeVisible();
 
-  // Monitor button should be visible
-  await expect(page.getByText("Monitor")).toBeVisible();
+  // Datadog button should be visible (use role to be specific)
+  await expect(page.getByRole("link", { name: "DataDog" })).toBeVisible();
 
   await page.screenshot({
     path: "output/playwright/report-card.png",

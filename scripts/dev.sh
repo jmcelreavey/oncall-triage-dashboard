@@ -7,7 +7,7 @@ log() {
   printf "[dev] %s\n" "$*"
 }
 
-NODE_REQUIRED_MAJOR=20
+NODE_REQUIRED_MAJOR=24
 
 purge_prefix_env() {
   local name
@@ -53,16 +53,7 @@ fi
 NODE_MAJOR=$(node -p "process.versions.node.split('.')[0]")
 log "Using Node $(node -v)"
 if [[ "$NODE_MAJOR" -ne "$NODE_REQUIRED_MAJOR" ]]; then
-  log "Warning: Node $NODE_MAJOR detected (expected $NODE_REQUIRED_MAJOR). Native modules may fail to load."
-elif [[ "$NODE_MAJOR" != "$ORIGINAL_NODE_MAJOR" ]]; then
-  log "Rebuilding native modules for Node $NODE_MAJOR"
-  npm rebuild better-sqlite3 >/dev/null 2>&1 || log "Warning: better-sqlite3 rebuild failed."
-fi
-
-log "Verifying Prisma SQLite adapter"
-if ! node -e "require('@prisma/adapter-better-sqlite3')" >/dev/null 2>&1; then
-  log "Rebuilding better-sqlite3 for current Node"
-  npm rebuild @prisma/adapter-better-sqlite3 better-sqlite3 >/dev/null 2>&1 || log "Warning: better-sqlite3 rebuild failed."
+  log "Warning: Node $NODE_MAJOR detected (expected $NODE_REQUIRED_MAJOR)."
 fi
 
 log "Ensuring Prisma database exists"
@@ -72,6 +63,9 @@ fi
 ( cd "$ROOT_DIR/apps/api" && npm run db:push ) || log "Prisma db push failed. Check Node version and Prisma." 
 
 node "$ROOT_DIR/scripts/ensure-opencode-server.mjs" || true
+
+# Stop any existing dev servers to prevent port conflicts and database locks
+"$ROOT_DIR/scripts/stop-dev.sh" 2>/dev/null || true
 
 cd "$ROOT_DIR"
 log "Starting dev servers"

@@ -1,4 +1,9 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnApplicationShutdown,
+  OnModuleInit,
+} from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import axios from 'axios';
 import { execFile, spawnSync } from 'child_process';
@@ -31,14 +36,14 @@ import { CodexProvider } from './providers/codex.provider';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { env, envBool, envNumber } from '../config/env';
-import { EvidenceBundle, gatherEvidence, SimilarIncident } from './evidence';
 import { Prisma } from '@prisma/client';
 import { MonitorRepoMappingService } from '../services/monitor-repo-mapping.service';
 
 @Injectable()
-export class TriageService implements OnModuleInit {
+export class TriageService implements OnModuleInit, OnApplicationShutdown {
   private readonly logger = new Logger(TriageService.name);
   private isRunning = false;
+  private isShuttingDown = false;
   private readonly schedulerName = 'default';
   private readonly lockName = 'triage-scheduler';
   private readonly ownerId = `${process.pid}-${Math.random().toString(36).slice(2)}`;
@@ -55,9 +60,18 @@ export class TriageService implements OnModuleInit {
     void this.runRepoAutoDiscovery();
   }
 
+  async onApplicationShutdown() {
+    this.logger.log('Application shutdown initiated...');
+    this.isShuttingDown = true;
+    await this.releaseLease();
+    this.isRunning = false;
+    this.logger.log('Application shutdown complete.');
+  }
+
   @Cron(CronExpression.EVERY_MINUTE)
   async handleCron() {
     if (!envBool('TRIAGE_ENABLED', true)) return;
+    if (this.isShuttingDown) return;
     await this.updateSchedulerState({ lastRunAt: new Date() });
     const intervalMs = envNumber('TRIAGE_INTERVAL_MS', 60_000);
     if (intervalMs > 60_000) {
@@ -369,27 +383,8 @@ export class TriageService implements OnModuleInit {
         alertId: previous.alert.id,
         status: 'running',
         provider: env('PROVIDER') ?? 'opencode',
-        parentRunId: previous.id,
       },
     });
-
-    const previousEvidence = this.asEvidenceBundle(previous.evidence);
-    if (
-      previousEvidence ||
-      previous.evidenceTimeline ||
-      previous.fixSuggestions ||
-      previous.similarIncidents
-    ) {
-      await this.prisma.triageRun.update({
-        where: { id: run.id },
-        data: {
-          evidence: previousEvidence ?? undefined,
-          evidenceTimeline: previous.evidenceTimeline ?? undefined,
-          fixSuggestions: previous.fixSuggestions ?? undefined,
-          similarIncidents: previous.similarIncidents ?? undefined,
-        },
-      });
-    }
 
     const alertContext: AlertContext = {
       monitorId: previous.alert.monitorId ?? undefined,
@@ -407,14 +402,10 @@ export class TriageService implements OnModuleInit {
       repoHint: previous.alert.repoHint ?? undefined,
       repoUrl: previous.alert.repoUrl ?? undefined,
       repoPath: previous.alert.repoPath ?? undefined,
-      githubEnrichment: previous.alert.githubEnrichment ?? undefined,
-      confluenceEnrichment: previous.alert.confluenceEnrichment ?? undefined,
     };
 
     void this.runTriage(run, alertContext, {
       previousReport: previous.reportMarkdown ?? '',
-      evidence: previousEvidence ?? undefined,
-      gatherEvidence: false,
     });
     return { queued: true, runId: run.id };
   }
@@ -439,7 +430,6 @@ export class TriageService implements OnModuleInit {
         alertId: previous.alert.id,
         status: 'running',
         provider: env('PROVIDER') ?? 'opencode',
-        parentRunId: previous.id,
       },
     });
     this.logger.log(`Created rerun ${run.id} for alert ${previous.alert.id}.`);
@@ -460,11 +450,9 @@ export class TriageService implements OnModuleInit {
       repoHint: previous.alert.repoHint ?? undefined,
       repoUrl: previous.alert.repoUrl ?? undefined,
       repoPath: previous.alert.repoPath ?? undefined,
-      githubEnrichment: previous.alert.githubEnrichment ?? undefined,
-      confluenceEnrichment: previous.alert.confluenceEnrichment ?? undefined,
     };
 
-    void this.runTriage(run, alertContext, { gatherEvidence: true });
+    void this.runTriage(run, alertContext, {});
     return { queued: true, runId: run.id };
   }
 
@@ -944,14 +932,7 @@ export class TriageService implements OnModuleInit {
       }
     }
 
-    this.logger.log('Starting enrichAlert()...');
-    const enrichment = await this.enrichAlert(alert);
-    this.logger.log('enrichAlert() completed');
-    const enrichedAlert: AlertContext = {
-      ...alert,
-      githubEnrichment: enrichment.github,
-      confluenceEnrichment: enrichment.confluence,
-    };
+    const enrichedAlert: AlertContext = { ...alert };
 
     if (!alertRecord) {
       this.logger.log('Creating new alert event record...');
@@ -974,8 +955,6 @@ export class TriageService implements OnModuleInit {
           repoHint: alert.repoHint,
           repoUrl: alert.repoUrl,
           repoPath: alert.repoPath,
-          githubEnrichment: enrichment.github ?? undefined,
-          confluenceEnrichment: enrichment.confluence ?? undefined,
         },
       });
     } else {
@@ -992,41 +971,8 @@ export class TriageService implements OnModuleInit {
     });
 
     this.logger.log('Starting runTriage()...');
-    await this.runTriage(run, enrichedAlert, { gatherEvidence: true });
+    await this.runTriage(run, enrichedAlert, {});
     this.logger.log('runTriage() completed');
-  }
-
-  private buildEvidenceFallback(error: unknown): EvidenceBundle {
-    const message = this.formatError(error);
-    return {
-      steps: [
-        {
-          id: 'evidence-failure',
-          title: 'Evidence gathering',
-          status: 'error',
-          startedAt: new Date().toISOString(),
-          finishedAt: new Date().toISOString(),
-          summary: message,
-        },
-      ],
-      artifacts: {},
-      repoFiles: [],
-      fixSuggestions: [],
-      similarIncidents: [],
-      evidenceMap: {
-        steps: [
-          {
-            id: 'evidence-failure',
-            title: 'Evidence gathering',
-            status: 'error',
-            summary: message,
-            artifacts: [],
-          },
-        ],
-        topRepoFindings: [],
-        fixSuggestions: [],
-      },
-    };
   }
 
   private async runTriage(
@@ -1034,8 +980,6 @@ export class TriageService implements OnModuleInit {
     alert: AlertContext,
     options?: {
       previousReport?: string;
-      evidence?: EvidenceBundle | null;
-      gatherEvidence?: boolean;
     },
   ) {
     const runStartTime = Date.now();
@@ -1044,97 +988,6 @@ export class TriageService implements OnModuleInit {
     );
 
     try {
-      let evidence: EvidenceBundle | null | undefined =
-        options?.evidence ?? null;
-      if (options?.gatherEvidence !== false && !evidence) {
-        this.logger.log(`[${run.id}] Starting evidence gathering`);
-        const evidenceStartTime = Date.now();
-
-        this.logger.log(`[${run.id}] Calling gatherEvidence()...`);
-
-        const repoRoot = this.resolveRepoRoot();
-        const datadogSite =
-          env('DATADOG_SITE', 'datadoghq.com') ?? 'datadoghq.com';
-        try {
-          evidence = await gatherEvidence({
-            alert,
-            repoRoot,
-            repoPath: alert.repoPath,
-            runId: run.id,
-            datadogSite,
-            datadogKeys: {
-              apiKey: env('DATADOG_API_KEY'),
-              appKey: env('DATADOG_APP_KEY'),
-            },
-            confluence: {
-              baseUrl: (() => {
-                const atlassianBaseUrl = env('ATLASSIAN_BASE_URL') ?? '';
-                return atlassianBaseUrl
-                  ? `${atlassianBaseUrl.replace(/\/$/, '')}/wiki`
-                  : '';
-              })(),
-              user: env('ATLASSIAN_USER') ?? env('CONFLUENCE_USER'),
-              token: env('ATLASSIAN_TOKEN') ?? env('CONFLUENCE_TOKEN'),
-            },
-            jira: {
-              baseUrl: (() => {
-                const atlassianBaseUrl = env('ATLASSIAN_BASE_URL') ?? '';
-                return atlassianBaseUrl.replace(/\/$/, '');
-              })(),
-              user: env('ATLASSIAN_USER') ?? env('CONFLUENCE_USER'),
-              token: env('ATLASSIAN_TOKEN') ?? env('CONFLUENCE_TOKEN'),
-            },
-            scanCommits: envNumber('REPO_SCAN_COMMITS', 20),
-            findSimilar: () => this.findSimilarIncidents(alert),
-            getRepoMapping: (
-              monitorId: string,
-              monitorName: string,
-              service?: string,
-            ) =>
-              this.repoMappingService.getRepoPathForMonitor(
-                monitorId,
-                monitorName,
-                service,
-              ),
-          });
-
-          const evidenceDuration = (
-            (Date.now() - evidenceStartTime) /
-            1000
-          ).toFixed(1);
-          this.logger.log(
-            `[${run.id}] Evidence gathering completed in ${evidenceDuration}s (${evidence.steps.length} steps)`,
-          );
-          this.logger.log(`[${run.id}] gatherEvidence() finished successfully`);
-        } catch (error: unknown) {
-          const evidenceDuration = (
-            (Date.now() - evidenceStartTime) /
-            1000
-          ).toFixed(1);
-          this.logger.warn(
-            `[${run.id}] Evidence gathering failed after ${evidenceDuration}s: ${this.formatError(error)}`,
-          );
-          evidence = this.buildEvidenceFallback(error);
-        }
-      } else if (evidence) {
-        this.logger.log(`[${run.id}] Using pre-gathered evidence`);
-      } else {
-        this.logger.log(`[${run.id}] Skipping evidence gathering`);
-      }
-
-      if (evidence) {
-        this.logger.log(`[${run.id}] Saving evidence to database`);
-        await this.prisma.triageRun.update({
-          where: { id: run.id },
-          data: {
-            evidence,
-            evidenceTimeline: evidence.steps,
-            fixSuggestions: evidence.fixSuggestions,
-            similarIncidents: evidence.similarIncidents,
-          },
-        });
-      }
-
       this.logger.log(
         `[${run.id}] Starting provider execution (${run.provider})`,
       );
@@ -1143,7 +996,6 @@ export class TriageService implements OnModuleInit {
 
       await this.executeProviderRun(run, alert, {
         previousReport: options?.previousReport,
-        evidence: evidence ?? undefined,
       });
 
       const providerDuration = (
@@ -1168,7 +1020,6 @@ export class TriageService implements OnModuleInit {
     runId: string,
     options?: {
       previousReport?: string;
-      evidence?: EvidenceBundle | null | undefined;
     },
   ) {
     const repoRoot = this.resolveRepoRoot();
@@ -1195,37 +1046,6 @@ export class TriageService implements OnModuleInit {
       );
     }
 
-    if (options?.evidence) {
-      const evidencePath = join(runDir, 'evidence.json');
-      writeFileSync(evidencePath, JSON.stringify(options.evidence, null, 2));
-      extraSections.push(
-        `EVIDENCE TIMELINE (steps + timestamps):\n${JSON.stringify(
-          options.evidence.steps ?? [],
-          null,
-          2,
-        ).slice(0, 8000)}`,
-      );
-      extraSections.push(
-        `EVIDENCE ARTIFACT KEYS:\n${Object.keys(options.evidence.artifacts ?? {}).join(', ')}`,
-      );
-      if (options.evidence.fixSuggestions?.length) {
-        extraSections.push(
-          `DRAFT FIX SUGGESTIONS (not applied):\n${JSON.stringify(
-            options.evidence.fixSuggestions,
-            null,
-            2,
-          ).slice(0, 8000)}`,
-        );
-      }
-      extraSections.push(
-        `EVIDENCE MAP (ids + summaries):\n${JSON.stringify(
-          options.evidence.evidenceMap ?? {},
-          null,
-          2,
-        ).slice(0, 8000)}`,
-      );
-    }
-
     const prompt = buildPrompt(alert, skillsContext, extraSections);
 
     const promptPath = join(runDir, 'prompt.txt');
@@ -1234,9 +1054,6 @@ export class TriageService implements OnModuleInit {
     const attachments = [alertPath, promptPath];
     if (options?.previousReport) {
       attachments.push(join(runDir, 'previous_report.md'));
-    }
-    if (options?.evidence) {
-      attachments.push(join(runDir, 'evidence.json'));
     }
     if (skillsPath && existsSync(skillsPath)) attachments.push(skillsPath);
 
@@ -1252,7 +1069,6 @@ export class TriageService implements OnModuleInit {
     alertContext: AlertContext,
     options?: {
       previousReport?: string;
-      evidence?: EvidenceBundle | null | undefined;
     },
   ) {
     this.logger.log(`[${run.id}] Building run inputs`);
@@ -1348,264 +1164,9 @@ export class TriageService implements OnModuleInit {
     return new MockProvider();
   }
 
-  private async findSimilarIncidents(
-    alert: AlertContext,
-  ): Promise<SimilarIncident[]> {
-    const service = alert.service;
-    const monitorName = alert.monitorName;
-    const orFilters: Prisma.AlertEventWhereInput[] = [];
-    if (service) orFilters.push({ service });
-    if (monitorName) orFilters.push({ monitorName });
-    const alertFilter = orFilters.length > 0 ? { OR: orFilters } : undefined;
-    const runs = await this.prisma.triageRun.findMany({
-      where: {
-        status: 'complete',
-        ...(alertFilter ? { alert: alertFilter } : {}),
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 5,
-      include: { alert: true },
-    });
-
-    return runs.map((run) => ({
-      id: run.id,
-      createdAt: run.createdAt.toISOString(),
-      summary: this.extractSummary(run.reportMarkdown ?? ''),
-      confidence: this.similarityConfidence(
-        alert,
-        run.alert?.service,
-        run.alert?.monitorName,
-      ),
-      service: run.alert?.service ?? undefined,
-      monitorName: run.alert?.monitorName ?? undefined,
-    }));
-  }
-
-  private extractSummary(report: string) {
-    const lines = report.split('\n').map((line) => line.trim());
-    const nonEmpty = lines.filter(Boolean);
-    if (nonEmpty.length === 0) return 'No summary available.';
-
-    // Try to find "Alert Summary" section
-    const alertSummaryIndex = nonEmpty.findIndex(
-      (line) =>
-        line.toLowerCase().includes('alert summary') ||
-        line.toLowerCase().includes('## alert summary'),
-    );
-
-    if (alertSummaryIndex !== -1 && alertSummaryIndex + 1 < nonEmpty.length) {
-      // Return the line after "Alert Summary" heading
-      return nonEmpty[alertSummaryIndex + 1].slice(0, 200);
-    }
-
-    // Fallback: look for first non-heading line that's not JSON
-    const nonJsonLines = nonEmpty.filter((line) => {
-      return (
-        !line.startsWith('#') && !line.startsWith('{') && !line.startsWith('[')
-      );
-    });
-
-    if (nonJsonLines.length > 0) {
-      return nonJsonLines[0].slice(0, 200);
-    }
-
-    return nonEmpty[0].slice(0, 200);
-  }
-
-  private similarityConfidence(
-    alert: AlertContext,
-    service?: string | null,
-    monitorName?: string | null,
-  ) {
-    let score = 0.4;
-    if (alert.service && service && alert.service === service)
-      score = Math.max(score, 0.7);
-    if (alert.monitorName && monitorName && alert.monitorName === monitorName)
-      score = Math.max(score, 0.8);
-    if (
-      alert.service &&
-      service &&
-      alert.monitorName &&
-      monitorName &&
-      alert.service === service &&
-      alert.monitorName === monitorName
-    ) {
-      score = 0.9;
-    }
-    return score;
-  }
-
-  private asEvidenceBundle(value: unknown): EvidenceBundle | null {
-    if (!value || typeof value !== 'object') return null;
-    return value as EvidenceBundle;
-  }
-
   private formatError(error: unknown) {
     if (error instanceof Error) return error.message;
     if (typeof error === 'string') return error;
     return 'Unknown error';
-  }
-
-  private async enrichAlert(alert: AlertContext) {
-    const github = await this.enrichGithub(alert).catch((error) => {
-      this.logger.warn(
-        `GitHub enrichment failed: ${error?.message ?? 'unknown error'}`,
-      );
-      return null;
-    });
-    const confluence = await this.enrichConfluence(alert).catch((error) => {
-      this.logger.warn(
-        `Confluence enrichment failed: ${error?.message ?? 'unknown error'}`,
-      );
-      return null;
-    });
-    return { github, confluence };
-  }
-
-  private async enrichGithub(alert: AlertContext) {
-    if (env('ENRICH_GITHUB') === 'false') return null;
-    const token = env('GITHUB_TOKEN');
-
-    let owner: string | undefined;
-    let repo: string | undefined;
-    if (alert.repoUrl) {
-      const match = alert.repoUrl.match(/github\.com\/([^/]+)\/([^\s]+)/i);
-      if (match) {
-        owner = match[1];
-        repo = match[2];
-      }
-    }
-    if (!owner && alert.repoHint) {
-      owner = env('GITHUB_DEFAULT_ORG') ?? 'businessinsider';
-      repo = alert.repoHint;
-    }
-    if (!owner || !repo) return null;
-
-    let repoData: any = null;
-    let commitsData: any[] = [];
-    let issuesData: any[] = [];
-    if (token) {
-      const headers = { Authorization: `Bearer ${token}` };
-      const repoResp = await axios.get(
-        `https://api.github.com/repos/${owner}/${repo}`,
-        { headers },
-      );
-      const commitsResp = await axios.get(
-        `https://api.github.com/repos/${owner}/${repo}/commits?per_page=5`,
-        {
-          headers,
-        },
-      );
-      const issuesResp = await axios.get(
-        `https://api.github.com/repos/${owner}/${repo}/issues?state=open&per_page=5`,
-        {
-          headers,
-        },
-      );
-      repoData = repoResp.data;
-      commitsData = commitsResp.data ?? [];
-      issuesData = issuesResp.data ?? [];
-    } else {
-      try {
-        const repoResp = await this.execFileAsync(
-          'gh',
-          ['api', `repos/${owner}/${repo}`, '--hostname', 'github.com'],
-          { timeout: 8_000 },
-        );
-        repoData = JSON.parse(repoResp.stdout);
-        const commitsResp = await this.execFileAsync(
-          'gh',
-          [
-            'api',
-            `repos/${owner}/${repo}/commits?per_page=5`,
-            '--hostname',
-            'github.com',
-          ],
-          { timeout: 8_000 },
-        );
-        commitsData = JSON.parse(commitsResp.stdout);
-        const issuesResp = await this.execFileAsync(
-          'gh',
-          [
-            'api',
-            `repos/${owner}/${repo}/issues?state=open&per_page=5`,
-            '--hostname',
-            'github.com',
-          ],
-          { timeout: 8_000 },
-        );
-        issuesData = JSON.parse(issuesResp.stdout);
-      } catch (error) {
-        this.logger.warn(
-          `GitHub CLI enrichment failed: ${this.formatError(error)}`,
-        );
-        return null;
-      }
-    }
-
-    const latestCommit = commitsData?.[0];
-    const openIssues = (issuesData ?? []).filter(
-      (issue: any) => !issue.pull_request,
-    );
-    const openPRs = (issuesData ?? []).filter(
-      (issue: any) => issue.pull_request,
-    );
-
-    return {
-      fullName: repoData?.full_name,
-      description: repoData?.description,
-      defaultBranch: repoData?.default_branch,
-      latestCommit: latestCommit
-        ? {
-            sha: latestCommit.sha,
-            message: latestCommit.commit?.message,
-            author: latestCommit.commit?.author?.name,
-            date: latestCommit.commit?.author?.date,
-          }
-        : null,
-      openIssues: openIssues.slice(0, 3).map((issue: any) => ({
-        title: issue.title,
-        url: issue.html_url,
-      })),
-      openPullRequests: openPRs.slice(0, 3).map((pr: any) => ({
-        title: pr.title,
-        url: pr.html_url,
-      })),
-    };
-  }
-
-  private async enrichConfluence(alert: AlertContext) {
-    if (env('ENRICH_CONFLUENCE') === 'false') return null;
-    const baseUrl = (() => {
-      const atlassianBaseUrl = env('ATLASSIAN_BASE_URL') ?? '';
-      return atlassianBaseUrl
-        ? `${atlassianBaseUrl.replace(/\/$/, '')}/wiki`
-        : env('CONFLUENCE_BASE_URL');
-    })();
-    const user = env('ATLASSIAN_USER') ?? env('CONFLUENCE_USER');
-    const token = env('ATLASSIAN_TOKEN') ?? env('CONFLUENCE_TOKEN');
-    if (!baseUrl || !user || !token) return null;
-
-    const terms = [alert.service, alert.repoHint, alert.sourceRepo]
-      .filter(Boolean)
-      .join(' ');
-    if (!terms) return null;
-    const cql = `text ~ \"${terms}\" AND (title ~ runbook OR title ~ incident OR text ~ runbook)`;
-
-    const resp = await axios.get(
-      `${baseUrl.replace(/\/$/, '')}/rest/api/search`,
-      {
-        auth: { username: user, password: token },
-        params: { cql, limit: 5 },
-      },
-    );
-
-    const results = resp.data?.results ?? [];
-    return results.slice(0, 3).map((item: any) => ({
-      title: item.title,
-      url: item._links
-        ? `${baseUrl.replace(/\/$/, '')}${item._links.webui}`
-        : undefined,
-    }));
   }
 }

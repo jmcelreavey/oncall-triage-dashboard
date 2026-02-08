@@ -171,7 +171,7 @@ export function ReportsList({
     let eventSource: EventSource | null = null;
     let reconnectTimeout: NodeJS.Timeout | null = null;
     let isMounted = true;
-    const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
+    const API_URL = process.env.NEXT_PUBLIC_API_URL || "/api";
 
     async function loadReports() {
       try {

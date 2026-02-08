@@ -3,25 +3,18 @@
   "private": true,
   "version": "0.1.0",
   "workspaces": [
-    "apps/*",
-    "packages/*"
+    "apps/*"
   ],
   "scripts": {
     "dev": "./scripts/dev.sh",
-    "dev:stop": "./scripts/stop-dev.sh",
-    "dev:servers": "concurrently -n web,api -c blue,green \"npm:dev:web\" \"npm:dev:api\"",
-    "dev:web": "npm --workspace apps/web run dev",
-    "dev:api": "npm --workspace apps/api run dev",
-    "build": "npm --workspace apps/web run build && npm --workspace apps/api run build",
+    "build": "npm --workspace apps/web run build",
     "start": "npm --workspace apps/web run start",
-    "lint": "npm --workspace apps/web run lint && npm --workspace apps/api run lint",
-    "db:push": "npm --workspace apps/api run db:push",
-    "db:migrate": "npm --workspace apps/api run db:migrate",
-    "db:studio": "npm --workspace apps/api run db:studio",
+    "lint": "npm --workspace apps/web run lint",
+    "db:push": "npm --workspace apps/web run db:push",
+    "db:studio": "npm --workspace apps/web run db:studio",
     "test:e2e": "playwright test"
   },
   "devDependencies": {
-    "@playwright/test": "^1.50.1",
-    "concurrently": "^9.0.1"
+    "@playwright/test": "^1.50.1"
   }
 }

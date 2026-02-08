@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import * as ContextMenu from "@radix-ui/react-context-menu";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "/api";
 
 export function TriggerRunButton() {
   const [isPending, startTransition] = useTransition();

@@ -6,11 +6,11 @@
 # Database files
 *.db
 *.db-journal
-apps/api/.data.db
 
 # Test output
 output/
 playwright-report/
+test-results/
 
 # Logs
 *.log

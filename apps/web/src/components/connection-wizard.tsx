@@ -5,8 +5,7 @@ import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { IntegrationHelp } from "@/components/integration-help";
 import { IntegrationTestButton } from "@/components/integration-test-button";
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "/api";
+import { API_URL } from "@/lib/api";
 
 export function ConnectionWizard({
   statusLabel,

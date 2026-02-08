@@ -1,8 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "/api";
+import { API_URL } from "@/lib/api";
 
 export function OpenFileButton({
   repoPath,
@@ -46,7 +45,9 @@ export function OpenFileButton({
       >
         {isPending ? "Opening" : "Open File"}
       </button>
-      {message && <span className="text-[0.6rem] text-[var(--ink-muted)]">{message}</span>}
+      {message && (
+        <span className="text-[0.6rem] text-[var(--ink-muted)]">{message}</span>
+      )}
     </div>
   );
 }

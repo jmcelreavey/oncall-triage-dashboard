@@ -1,8 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "/api";
+import { API_URL } from "@/lib/api";
 
 export function RerunButton({ runId }: { runId: string }) {
   const [isPending, startTransition] = useTransition();
@@ -12,7 +11,9 @@ export function RerunButton({ runId }: { runId: string }) {
     setMessage(null);
     startTransition(async () => {
       try {
-        const res = await fetch(`${API_URL}/triage/rerun/${runId}`, { method: "POST" });
+        const res = await fetch(`${API_URL}/triage/rerun/${runId}`, {
+          method: "POST",
+        });
         const data = await res.json();
         if (!res.ok || data.error) {
           setMessage(data.error ?? "Failed to re-run triage.");
@@ -43,7 +44,11 @@ export function RerunButton({ runId }: { runId: string }) {
       >
         {isPending ? "Re-triaging" : "Re-triage"}
       </button>
-      {message && <span className="text-[0.65rem] text-[var(--ink-muted)]">{message}</span>}
+      {message && (
+        <span className="text-[0.65rem] text-[var(--ink-muted)]">
+          {message}
+        </span>
+      )}
     </div>
   );
 }

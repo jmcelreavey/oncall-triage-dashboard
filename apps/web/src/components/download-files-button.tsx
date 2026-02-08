@@ -1,8 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "/api";
+import { API_URL } from "@/lib/api";
 
 type RunInputs = {
   runId: string;

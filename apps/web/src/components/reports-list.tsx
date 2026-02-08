@@ -8,7 +8,7 @@ import { CopyButton } from "@/components/copy-button";
 import { ClearDataButton } from "@/components/clear-data-button";
 import { DownloadFilesButton } from "@/components/download-files-button";
 import { ReportSummary } from "@/components/report-summary";
-import { fetchReports } from "@/lib/api";
+import { fetchReports, API_URL } from "@/lib/api";
 
 type Report = {
   id: string;
@@ -171,7 +171,6 @@ export function ReportsList({
     let eventSource: EventSource | null = null;
     let reconnectTimeout: NodeJS.Timeout | null = null;
     let isMounted = true;
-    const API_URL = process.env.NEXT_PUBLIC_API_URL || "/api";
 
     async function loadReports() {
       try {

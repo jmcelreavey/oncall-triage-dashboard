@@ -27,8 +27,8 @@ import { OpenCodeProvider } from "@/services/providers/opencode.provider";
 import { MockProvider } from "@/services/providers/mock.provider";
 import { CodexProvider } from "@/services/providers/codex.provider";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
-import { join } from "path";
 import { envString, envBool, envNumber } from "@/utils/env";
+import { formatError } from "@/utils/error";
 import { Prisma } from "@prisma/client";
 import { MonitorRepoMappingService } from "@/services/monitor-repo-mapping.service";
 
@@ -333,7 +333,7 @@ export class TriageService {
           return false;
         }
         this.logger.warn(
-          `Failed to acquire scheduler lease: ${this.formatError(error)}`,
+          `Failed to acquire scheduler lease: ${formatError(error)}`,
         );
         return false;
       }
@@ -389,7 +389,7 @@ export class TriageService {
       return { queued: false, reason: "already_running" };
     }
     void this.runSchedulerTick().catch((error) => {
-      this.logger.error(`Manual run failed: ${this.formatError(error)}`);
+      this.logger.error(`Manual run failed: ${formatError(error)}`);
     });
     return { queued: true };
   }
@@ -518,16 +518,14 @@ export class TriageService {
       void this.processAlert(lastError, { allowReprocess: true }).catch(
         (error) => {
           this.logger.error(
-            `Reprocess last error failed: ${this.formatError(error)}`,
+            `Reprocess last error failed: ${formatError(error)}`,
           );
         },
       );
       this.logger.log(`Reprocess last error queued successfully.`);
     } catch (error: unknown) {
-      this.logger.error(
-        `Reprocess last error failed: ${this.formatError(error)}`,
-      );
-      return { error: this.formatError(error) };
+      this.logger.error(`Reprocess last error failed: ${formatError(error)}`);
+      return { error: formatError(error) };
     }
     return { queued: true, monitorId: lastError.monitorId };
   }
@@ -1044,7 +1042,7 @@ export class TriageService {
     } catch (error: unknown) {
       const totalDuration = ((Date.now() - runStartTime) / 1000).toFixed(1);
       this.logger.error(
-        `[${run.id}] Triage failed after ${totalDuration}s: ${this.formatError(error)}`,
+        `[${run.id}] Triage failed after ${totalDuration}s: ${formatError(error)}`,
       );
       await this.failRun(run.id, error);
     }
@@ -1058,13 +1056,13 @@ export class TriageService {
     },
   ) {
     const repoRoot = this.resolveRepoRoot();
-    const runDir = join(
-      envString("RUNS_DIR") ?? join(process.cwd(), "data", "runs"),
+    const runDir = path.join(
+      envString("RUNS_DIR") ?? path.join(process.cwd(), "data", "runs"),
       runId,
     );
     if (!existsSync(runDir)) mkdirSync(runDir, { recursive: true });
 
-    const alertPath = join(runDir, "alert.json");
+    const alertPath = path.join(runDir, "alert.json");
     writeFileSync(alertPath, JSON.stringify(alert, null, 2));
 
     const skillsPath = envString("SKILLS_CONTEXT_PATH");
@@ -1074,7 +1072,7 @@ export class TriageService {
         : undefined;
     const extraSections: string[] = [];
     if (options?.previousReport) {
-      const reportPath = join(runDir, "previous_report.md");
+      const reportPath = path.join(runDir, "previous_report.md");
       writeFileSync(reportPath, options.previousReport);
       extraSections.push(
         `PREVIOUS REPORT:\n${options.previousReport}`.slice(0, 8000),
@@ -1083,12 +1081,12 @@ export class TriageService {
 
     const prompt = buildPrompt(alert, skillsContext, extraSections);
 
-    const promptPath = join(runDir, "prompt.txt");
+    const promptPath = path.join(runDir, "prompt.txt");
     writeFileSync(promptPath, prompt);
 
     const attachments = [alertPath, promptPath];
     if (options?.previousReport) {
-      attachments.push(join(runDir, "previous_report.md"));
+      attachments.push(path.join(runDir, "previous_report.md"));
     }
     if (skillsPath && existsSync(skillsPath)) attachments.push(skillsPath);
 
@@ -1161,11 +1159,11 @@ export class TriageService {
       where: { id: runId },
       data: {
         status: "failed",
-        error: this.formatError(error),
+        error: formatError(error),
         finishedAt: new Date(),
       },
     });
-    this.logger.error(`Triage failed: ${this.formatError(error)}`);
+    this.logger.error(`Triage failed: ${formatError(error)}`);
   }
 
   private getProvider(): TriageProvider {
@@ -1193,11 +1191,5 @@ export class TriageService {
       return new OpenCodeProvider(bin, model, variant);
     }
     return new MockProvider();
-  }
-
-  private formatError(error: unknown) {
-    if (error instanceof Error) return error.message;
-    if (typeof error === "string") return error;
-    return "Unknown error";
   }
 }

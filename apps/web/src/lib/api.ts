@@ -1,4 +1,4 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "/api";
+export const API_URL = process.env.NEXT_PUBLIC_API_URL || "/api";
 
 export async function fetchReports() {
   const res = await fetch(`${API_URL}/reports`, { cache: "no-store" });

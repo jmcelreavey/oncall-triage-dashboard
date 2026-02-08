@@ -2,12 +2,13 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "/api";
+import { API_URL } from "@/lib/api";
 
 export function IntegrationTestButton({ name }: { name: string }) {
   const [isPending, startTransition] = useTransition();
-  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(
+    null,
+  );
   const router = useRouter();
 
   const handleClick = () => {
@@ -24,7 +25,10 @@ export function IntegrationTestButton({ name }: { name: string }) {
           setResult({ ok: false, message: data.error ?? "Test failed." });
           return;
         }
-        setResult({ ok: Boolean(data.ok), message: data.message ?? "Test complete." });
+        setResult({
+          ok: Boolean(data.ok),
+          message: data.message ?? "Test complete.",
+        });
         router.refresh();
       } catch {
         setResult({ ok: false, message: "Test failed." });
@@ -42,7 +46,9 @@ export function IntegrationTestButton({ name }: { name: string }) {
         {isPending ? "Testing" : "Test"}
       </button>
       {result && (
-        <span className={`text-[0.6rem] ${result.ok ? "text-[var(--accent-3)]" : "text-[var(--accent)]"}`}>
+        <span
+          className={`text-[0.6rem] ${result.ok ? "text-[var(--accent-3)]" : "text-[var(--accent)]"}`}
+        >
           {result.message}
         </span>
       )}

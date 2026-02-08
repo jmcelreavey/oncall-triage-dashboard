@@ -1,8 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "/api";
+import { API_URL } from "@/lib/api";
 
 type Suggestion = {
   branchName: string;
@@ -18,7 +17,9 @@ export function BranchSuggestionButton({ runId }: { runId: string }) {
 
   const handleClick = () => {
     startTransition(async () => {
-      const res = await fetch(`${API_URL}/triage/suggest-branch/${runId}`, { method: "POST" });
+      const res = await fetch(`${API_URL}/triage/suggest-branch/${runId}`, {
+        method: "POST",
+      });
       const data = await res.json();
       setSuggestion(data);
     });
@@ -35,14 +36,18 @@ export function BranchSuggestionButton({ runId }: { runId: string }) {
         {isPending ? "Suggesting" : "Suggest Branch"}
       </button>
       {suggestion?.error && (
-        <span className="text-[0.65rem] text-[var(--accent)]">{suggestion.error}</span>
+        <span className="text-[0.65rem] text-[var(--accent)]">
+          {suggestion.error}
+        </span>
       )}
       {suggestion && !suggestion.error && (
         <div className="panel rounded-xl p-3 text-[0.7rem]">
-          <p className="font-semibold text-[var(--ink)]">{suggestion.branchName}</p>
+          <p className="font-semibold text-[var(--ink)]">
+            {suggestion.branchName}
+          </p>
           {suggestion.commands && (
             <pre className="mt-2 whitespace-pre-wrap text-[0.65rem] text-[var(--ink-muted)]">
-{suggestion.commands.join("\n")}
+              {suggestion.commands.join("\n")}
             </pre>
           )}
           {suggestion.files && suggestion.files.length > 0 && (

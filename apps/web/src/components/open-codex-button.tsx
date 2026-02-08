@@ -1,8 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "/api";
+import { API_URL } from "@/lib/api";
 
 export function OpenCodexButton({ runId }: { runId: string }) {
   const [isPending, startTransition] = useTransition();
@@ -12,7 +11,9 @@ export function OpenCodexButton({ runId }: { runId: string }) {
     setMessage(null);
     startTransition(async () => {
       try {
-        const res = await fetch(`${API_URL}/triage/open-codex/${runId}`, { method: "POST" });
+        const res = await fetch(`${API_URL}/triage/open-codex/${runId}`, {
+          method: "POST",
+        });
         const data = await res.json();
         if (!res.ok || data.error) {
           setMessage(data.error ?? "Failed to open Codex session.");
@@ -39,7 +40,11 @@ export function OpenCodexButton({ runId }: { runId: string }) {
       >
         {isPending ? "Opening" : "Open Codex"}
       </button>
-      {message && <span className="text-[0.65rem] text-[var(--ink-muted)]">{message}</span>}
+      {message && (
+        <span className="text-[0.65rem] text-[var(--ink-muted)]">
+          {message}
+        </span>
+      )}
     </div>
   );
 }

@@ -3,6 +3,7 @@
 A local, self-contained dashboard + scheduler that watches Datadog, launches an OpenCode/Codex triage session, and stores the report in SQLite for review.
 
 **Goals baked into the scaffold**
+
 - Prompt-first triage: the agent is instructed to use `git`, `rg`, `kubectl`, GitHub, and Confluence instead of relying on precomputed Python.
 - Evidence-based output: the report must cite JSON fields and the command results the agent gathered.
 - Local + safe: nothing is pushed or PR'd unless you ask.
@@ -10,7 +11,7 @@ A local, self-contained dashboard + scheduler that watches Datadog, launches an 
 ## What’s included
 
 - **Next.js dashboard** (`apps/web`) with a clean status UI and report viewer.
-- **NestJS API + scheduler** (`apps/api`) with a 1‑minute cron.
+- **Built-in scheduler** with a 1‑minute cron.
 - **Prisma + SQLite** for local persistence.
 - **OpenCode provider** (default) with session ID + URL support.
 - **Session continuation** button to re-run a triage based on the last report.
@@ -22,7 +23,6 @@ A local, self-contained dashboard + scheduler that watches Datadog, launches an 
 - **Branch suggestion** button that proposes a fix-branch name based on the report.
 - **Business Insider-inspired light/dark theme** with a quick toggle.
 - **Evidence gatherer pipeline** (git history, repo diffs, K8s live state, Datadog logs, runbooks, Jira/Confluence).
-- **Per-service heuristics registry** (`apps/api/config/heuristics.yaml`) for known failure patterns.
 - **Similar incident surfacing** with confidence + timeline.
 - **Scheduler health endpoint** with freshness checks.
 - **Scheduler lock + lease + catch-up** to prevent overlaps and recover missed intervals.
@@ -46,12 +46,6 @@ npm install
 cp .env.example .env
 ```
 
-Also create the API-only `.env` for Prisma:
-
-```bash
-cp apps/api/.env.example apps/api/.env
-```
-
 3. (Optional) Generate skills context:
 
 ```bash
@@ -73,7 +67,6 @@ npm run dev
 ```
 
 - Web: `http://localhost:3000`
-- API: `http://localhost:4000`
 
 To enable session deep links, run:
 
@@ -92,6 +85,7 @@ opencode serve --port 4096
 4. The report is stored in SQLite and shown in the dashboard.
 
 `npm run dev` also:
+
 - Syncs `.env` from your `.zshrc`
 - Generates `skills_context.md`
 - Ensures the SQLite DB exists via Prisma
@@ -115,7 +109,6 @@ See `.env.example` for all variables. The most important:
 - `OPENCODE_VARIANT` (optional; omit to use OpenCode defaults)
 - `OPENCODE_WEB_URL=http://127.0.0.1:4096`
 - `TRIAGE_INTERVAL_MS=60000`
-- Prisma 7 uses `apps/api/prisma.config.ts` for datasource config.
 
 ## API endpoints
 
@@ -139,13 +132,12 @@ See `.env.example` for all variables. The most important:
 ## Tests
 
 ```bash
-npm --workspace apps/api test
 npm run test:e2e
 ```
 
 Unit tests cover core parsing utilities (alert parsing + evidence helpers). Evidence helpers are exported for tests only.
 
-Note: `npm run test:e2e` starts its own web+api servers with an isolated SQLite DB. Stop any running dev servers first so ports 3000/4000 are free.
+Note: `npm run test:e2e` starts its own web server with an isolated SQLite DB. Stop any running dev servers first so port 3000 is free.
 
 ## Next steps (when you’re ready)
 

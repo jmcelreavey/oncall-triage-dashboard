@@ -15,13 +15,13 @@ let seeded: SeededRuns = { runId: "", codexRunId: "" };
 
 async function ensureTestDb(dbPath: string) {
   await mkdir(path.dirname(dbPath), { recursive: true });
-  const devDb = path.resolve(process.cwd(), "apps/api/dev.db");
+  const devDb = path.resolve(process.cwd(), "apps/web/data/dev.db");
   if (existsSync(devDb)) {
     await copyFile(devDb, dbPath);
     return;
   }
   execSync(
-    "npx prisma db push --schema apps/api/prisma/schema.prisma --skip-generate",
+    "npx prisma db push --schema apps/web/prisma/schema.prisma --skip-generate",
     {
       env: { ...process.env, DATABASE_URL: `file:${dbPath}` },
       stdio: "ignore",

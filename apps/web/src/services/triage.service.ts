@@ -1094,7 +1094,7 @@ export class TriageService {
     return {
       prompt: "Use the attached prompt.txt and alert.json files.",
       attachments,
-      workingDir: repoRoot,
+      workingDir: runDir,
     };
   }
 

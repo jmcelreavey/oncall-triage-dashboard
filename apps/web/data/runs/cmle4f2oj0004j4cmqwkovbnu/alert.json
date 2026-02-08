@@ -1,0 +1,19 @@
+{
+  "monitorId": "235981150",
+  "monitorName": "Dad Team FluxCD Errors Alert",
+  "monitorState": "OK",
+  "priority": 2,
+  "monitorUrl": "https://app.datadoghq.com/monitors/235981150",
+  "monitorMessage": "{{#is_alert}}\n  *Dad Team FluxCD Error Alert*\n\n  A FluxCD error: {{@error.name}} has been detected in cluster: {{eks_cluster-name.name}} for the Dad team.\n\n  *Team Specific Actions:*\n  - Please review your team's FluxCD resources and logs.\n  - Investigate recent changes or deployments in your namespace.\n  - Escalate to CloudEng Team if needed.\n\n  *Runbook:* [FluxCD Common Issues Runbook](https://businessinsider.atlassian.net/wiki/x/BQCFNAE)\n  *Insider-docs:* [FluxCD Common Issues Runbook](https://docs.insider.pub/guides/cloudeng/fluxcd-common-issues-runbook)\n  *Dashboard:* [Feature team dashboard link here (in progress)]\n{{/is_alert}}\n\n{{#is_recovery}}\n  *Dad Team FluxCD Error Resolved*\n{{/is_recovery}}\n\n  @slack-dad-team-alerts",
+  "monitorQuery": "logs(\"(@GitRepository.namespace:dad OR @ImageUpdateAutomation.namespace:dad OR @ImageRepository.namespace:dad OR @ImagePolicy.namespace:dad OR @Kustomization.namespace:dad) status:error AND NOT @error:(\\\"failed to update status: timed out waiting for the condition\\\" OR \\\"GitOperationFailed\\\" OR \\\"timed out waiting for the condition\\\" OR \\\"AuthenticationFailed\\\" OR \\\"no tags in database\\\" OR \\\"DependencyNotReady\\\" OR \\\"*failed to checkout source*\\\" OR *authentication* OR *ssh* OR *manager* OR *webhook* OR *referred* OR \\\"failed to update source: failed to push to remote: object not found\\\" OR *secrets*) -\\\"timed out waiting for the condition\\\" -\\\"failed to configure authentication options:*\\\" -\\\"failed configuring source manager\\\" -*ssh*\").index(\"*\").rollup(\"count\").by(\"service,status,@error,eks_cluster-name\").last(\"15m\") > 2",
+  "monitorTags": [
+    "environment:prd",
+    "iac:terraform",
+    "organization:businessinsider",
+    "sourceRepo:eks-config",
+    "team:dad"
+  ],
+  "overallStateModified": "2026-02-08T15:07:10.000Z",
+  "environment": "prd",
+  "sourceRepo": "eks-config"
+}

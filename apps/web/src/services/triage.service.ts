@@ -434,7 +434,14 @@ export class TriageService {
   }
 
   private resolveRepoRoot() {
-    return envString("REPO_ROOT") ?? path.resolve(__dirname, "../../../../..");
+    const fromEnv = envString("REPO_ROOT");
+    if (fromEnv) return fromEnv;
+
+    const resolvedPath = path.resolve(__dirname, "../../../../..");
+    this.logger.log(
+      `resolveRepoRoot: __dirname=${__dirname}, resolved=${resolvedPath}`,
+    );
+    return resolvedPath;
   }
 
   async rerunRun(runId: string) {
@@ -1083,6 +1090,7 @@ export class TriageService {
     }
     if (skillsPath && existsSync(skillsPath)) attachments.push(skillsPath);
 
+    this.logger.log(`buildRunInputs: runDir=${runDir}, repoRoot=${repoRoot}`);
     return {
       prompt: "Use the attached prompt.txt and alert.json files.",
       attachments,
@@ -1127,14 +1135,9 @@ export class TriageService {
     );
     this.logger.log(`[${run.id}] executeProviderRun() finished`);
 
-    const apiBase = envString("API_PUBLIC_URL") ?? "http://localhost:4000";
-    const sessionUrl =
-      result.sessionUrl ??
-      (result.sessionId && run.provider === "codex"
-        ? `${apiBase.replace(/\/$/, "")}/triage/open-codex/${run.id}`
-        : result.sessionId && run.provider === "opencode"
-          ? `${apiBase.replace(/\/$/, "")}/triage/opencode/${run.id}`
-          : undefined);
+    this.logger.log(
+      `[${run.id}] Provider sessionUrl: ${result.sessionUrl ?? "(none)"}`,
+    );
 
     this.logger.log(`[${run.id}] Saving completed run to database`);
     await this.prisma.triageRun.update({
@@ -1143,12 +1146,12 @@ export class TriageService {
         status: "complete",
         reportMarkdown: result.reportMarkdown,
         sessionId: result.sessionId,
-        sessionUrl,
+        sessionUrl: result.sessionUrl,
         finishedAt: new Date(),
       },
     });
 
-    return { ...result, sessionUrl };
+    return { ...result, sessionUrl: result.sessionUrl };
   }
 
   private async failRun(runId: string, error: unknown) {

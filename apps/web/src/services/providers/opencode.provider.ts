@@ -367,6 +367,12 @@ export class OpenCodeProvider implements TriageProvider {
       `[${runId}] Environment: OPENCODE_WEB_URL=${webBase ? webBase : "(not set)"}`,
     );
     console.log(`[${runId}] Working directory: ${workingDir}`);
+    console.log(
+      `[${runId}] Working directory exists: ${await fs.access(workingDir).then(
+        () => true,
+        () => false,
+      )}`,
+    );
 
     // Query the actual session directory that OpenCode used (it may differ from workingDir)
     let actualDirectory = workingDir;
@@ -394,9 +400,13 @@ export class OpenCodeProvider implements TriageProvider {
       }
     }
 
+    const encodedPath = encodeRepoPath(actualDirectory);
+    console.log(
+      `[${runId}] Encoded path: ${encodedPath ? encodedPath.substring(0, 50) : "(empty)"}...`,
+    );
     const sessionUrl =
       sessionId && webBase
-        ? `${webBase.replace(/\/$/, "")}/${encodeRepoPath(actualDirectory)}/session/${sessionId}`
+        ? `${webBase.replace(/\/$/, "")}/${encodedPath || ""}/session/${sessionId}`
         : undefined;
 
     console.log(

@@ -15,7 +15,6 @@ const configureSchema = z.object({
   provider: z.string().optional(),
   repoRoot: z.string().optional(),
   opencodeWebUrl: z.string().optional(),
-  apiUrl: z.string().optional(),
   codexBin: z.string().optional(),
   codexModel: z.string().optional(),
 });

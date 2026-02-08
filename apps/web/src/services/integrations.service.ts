@@ -26,7 +26,7 @@ export interface IntegrationStatus {
 export class IntegrationsService {
   constructor(private prisma: PrismaService) {}
 
-  private rootDir = path.resolve(__dirname, "../../../../..");
+  private rootDir = process.cwd();
   private execFileAsync = promisify(execFile);
 
   private formatValue(value: string) {
@@ -177,22 +177,61 @@ export class IntegrationsService {
   }
 
   async getConfig() {
+    const appConfig = await this.prisma.appConfig.findUnique({
+      where: { id: "default" },
+    });
+
+    const dbConfig = appConfig
+      ? {
+          datadogApiKey: appConfig.datadogApiKey ?? "",
+          datadogAppKey: appConfig.datadogAppKey ?? "",
+          datadogSite: appConfig.datadogSite ?? "datadoghq.com",
+          alertTeam: appConfig.alertTeam ?? "",
+          githubToken: appConfig.githubToken ?? "",
+          confluenceBaseUrl: appConfig.confluenceBaseUrl ?? "",
+          confluenceUser: appConfig.confluenceUser ?? "",
+          confluenceToken: appConfig.confluenceToken ?? "",
+          provider: appConfig.provider ?? "opencode",
+          repoRoot: appConfig.repoRoot ?? "",
+          opencodeWebUrl: appConfig.opencodeWebUrl ?? "",
+          codexBin: appConfig.codexBin ?? this.resolveCodexBin(),
+          codexModel: appConfig.codexModel ?? "gpt-5.2-codex",
+        }
+      : {};
+
+    const atlassianBaseUrl =
+      envString("ATLASSIAN_BASE_URL") ??
+      envString("CONFLUENCE_BASE_URL") ??
+      dbConfig.confluenceBaseUrl ??
+      "";
+
     return {
-      datadogApiKey: envString("DATADOG_API_KEY") ?? "",
-      datadogAppKey: envString("DATADOG_APP_KEY") ?? "",
-      datadogSite: envString("DATADOG_SITE") ?? "datadoghq.com",
-      alertTeam: envString("ALERT_TEAM") ?? "",
-      githubToken: envString("GITHUB_TOKEN") ?? "",
-      confluenceBaseUrl: envString("CONFLUENCE_BASE_URL") ?? "",
+      datadogApiKey:
+        envString("DATADOG_API_KEY") ?? dbConfig.datadogApiKey ?? "",
+      datadogAppKey:
+        envString("DATADOG_APP_KEY") ?? dbConfig.datadogAppKey ?? "",
+      datadogSite:
+        envString("DATADOG_SITE") ?? dbConfig.datadogSite ?? "datadoghq.com",
+      alertTeam: envString("ALERT_TEAM") ?? dbConfig.alertTeam ?? "",
+      githubToken: envString("GITHUB_TOKEN") ?? dbConfig.githubToken ?? "",
+      confluenceBaseUrl: atlassianBaseUrl,
       confluenceUser:
-        envString("ATLASSIAN_USER") ?? envString("CONFLUENCE_USER") ?? "",
+        envString("ATLASSIAN_USER") ??
+        envString("CONFLUENCE_USER") ??
+        dbConfig.confluenceUser ??
+        "",
       confluenceToken:
-        envString("ATLASSIAN_TOKEN") ?? envString("CONFLUENCE_TOKEN") ?? "",
-      provider: envString("PROVIDER") ?? "opencode",
-      repoRoot: envString("REPO_ROOT") ?? "",
-      opencodeWebUrl: envString("OPENCODE_WEB_URL") ?? "",
+        envString("ATLASSIAN_TOKEN") ??
+        envString("CONFLUENCE_TOKEN") ??
+        dbConfig.confluenceToken ??
+        "",
+      provider: envString("PROVIDER") ?? dbConfig.provider ?? "opencode",
+      repoRoot: envString("REPO_ROOT") ?? dbConfig.repoRoot ?? "",
+      opencodeWebUrl:
+        envString("OPENCODE_WEB_URL") ?? dbConfig.opencodeWebUrl ?? "",
       codexBin: this.resolveCodexBin(),
-      codexModel: envString("CODEX_MODEL") ?? "gpt-5.2-codex",
+      codexModel:
+        envString("CODEX_MODEL") ?? dbConfig.codexModel ?? "gpt-5.2-codex",
     };
   }
 
@@ -552,9 +591,8 @@ export class IntegrationsService {
   }
 
   async configure(payload: Record<string, unknown>) {
-    const rootEnv = path.join(this.rootDir, ".env");
-    const apiEnv = path.join(this.rootDir, "apps/api/.env");
-    const webEnv = path.join(this.rootDir, "apps/web/.env.local");
+    const rootEnv = path.join(this.rootDir, "..", ".env");
+    const webEnv = path.join(this.rootDir, ".env.local");
 
     const updates: Record<string, string> = {};
     if (Object.prototype.hasOwnProperty.call(payload, "datadogApiKey")) {
@@ -580,7 +618,7 @@ export class IntegrationsService {
         typeof payload.githubToken === "string" ? payload.githubToken : "";
     }
     if (Object.prototype.hasOwnProperty.call(payload, "confluenceBaseUrl")) {
-      updates.CONFLUENCE_BASE_URL =
+      updates.ATLASSIAN_BASE_URL =
         typeof payload.confluenceBaseUrl === "string"
           ? payload.confluenceBaseUrl
           : "";
@@ -623,11 +661,7 @@ export class IntegrationsService {
     }
 
     await this.updateEnvFile(rootEnv, updates);
-    await this.updateEnvFile(apiEnv, updates);
-    await fs.writeFile(
-      webEnv,
-      `NEXT_PUBLIC_API_URL=${typeof payload.apiUrl === "string" ? payload.apiUrl : "http://localhost:4000"}\n`,
-    );
+    await this.updateEnvFile(webEnv, updates);
 
     for (const [key, value] of Object.entries(updates)) {
       if (value !== undefined) process.env[key] = value;
@@ -641,7 +675,7 @@ export class IntegrationsService {
         datadogSite: updates.DATADOG_SITE,
         alertTeam: updates.ALERT_TEAM,
         githubToken: updates.GITHUB_TOKEN,
-        confluenceBaseUrl: updates.CONFLUENCE_BASE_URL,
+        confluenceBaseUrl: updates.ATLASSIAN_BASE_URL,
         confluenceUser: updates.ATLASSIAN_USER,
         confluenceToken: updates.ATLASSIAN_TOKEN,
         provider: updates.PROVIDER,
@@ -657,7 +691,7 @@ export class IntegrationsService {
         datadogSite: updates.DATADOG_SITE,
         alertTeam: updates.ALERT_TEAM,
         githubToken: updates.GITHUB_TOKEN,
-        confluenceBaseUrl: updates.CONFLUENCE_BASE_URL,
+        confluenceBaseUrl: updates.ATLASSIAN_BASE_URL,
         confluenceUser: updates.ATLASSIAN_USER,
         confluenceToken: updates.ATLASSIAN_TOKEN,
         provider: updates.PROVIDER,

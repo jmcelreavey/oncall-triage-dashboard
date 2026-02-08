@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "NODE_OPTIONS=--no-deprecation next dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
@@ -11,7 +11,9 @@
     "db:studio": "prisma studio"
   },
   "dependencies": {
+    "@prisma/client": "^6.2.1",
     "@radix-ui/react-context-menu": "^2.2.5",
+    "axios": "^1.13.4",
     "next": "16.1.6",
     "node-cron": "^4.2.1",
     "react": "19.2.3",
@@ -26,6 +28,7 @@
     "babel-plugin-react-compiler": "1.0.0",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
+    "prisma": "^6.2.1",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

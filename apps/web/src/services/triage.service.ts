@@ -89,6 +89,7 @@ export class TriageService {
       });
       const lastRunAt = scheduler?.lastRunAt?.getTime() ?? 0;
       if (Date.now() - lastRunAt < Math.max(intervalMs - 1_000, 0)) {
+        setTimeout(() => void this.handleCron(), 1000);
         return;
       }
     }
@@ -96,6 +97,7 @@ export class TriageService {
     if (result?.skipped) {
       this.logger.warn(`Scheduler tick skipped: ${result.skipped}.`);
     }
+    setTimeout(() => void this.handleCron(), intervalMs);
   }
 
   async runSchedulerTick() {

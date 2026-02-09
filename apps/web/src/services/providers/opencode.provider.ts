@@ -197,7 +197,9 @@ export class OpenCodeProvider implements TriageProvider {
   }): Promise<ProviderResult> {
     const { runId, prompt, attachments, workingDir } = params;
     const title = `Triage ${basename(workingDir)} ${new Date().toISOString()}`;
-    const timeoutMs = Number(process.env.TRIAGE_PROVIDER_TIMEOUT_MS ?? 600_000);
+    const timeoutMs = Number(
+      process.env.TRIAGE_PROVIDER_TIMEOUT_MS ?? 1_200_000,
+    );
 
     const reportFilePath = `${workingDir}/.opencode-report-${runId}.txt`;
     const augmentedPrompt = `${prompt}\n\nIMPORTANT: At the end of your investigation, write your final report to the file ${reportFilePath} using the Write tool. This report should include your diagnosis, findings, and recommended actions.`;

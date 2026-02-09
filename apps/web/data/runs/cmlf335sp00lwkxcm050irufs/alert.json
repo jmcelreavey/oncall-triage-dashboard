@@ -1,0 +1,16 @@
+{
+  "monitorId": "73719804",
+  "monitorName": "syndication-pull-service-prd /pull throughput",
+  "monitorState": "Alert",
+  "priority": 4,
+  "monitorUrl": "https://app.datadoghq.com/monitors/73719804",
+  "monitorMessage": "`syndication-pull-service-prd` throughput {{#is_alert}}is 100% anomalous /pull throughput{{/is_alert}}{{#is_warning}}is 75% anomalous{{/is_warning}}{{#is_recovery}}has recovered{{/is_recovery}}.\n\n@slack-dad-team-alerts",
+  "monitorQuery": "avg(last_4h):anomalies(sum:trace.go.opentelemetry.io_contrib_instrumentation_net_http_otelhttp.server.hits{env:prd,service:syndication-pull-service,resource_name:get_/pull/_scope_/*}.as_count(), 'agile', 1, direction='both', interval=60, alert_window='last_15m', count_default_zero='true', timezone='utc', seasonality='hourly') >= 1",
+  "monitorTags": [
+    "service:syndication-pull-service",
+    "team:dad",
+    "env:prd"
+  ],
+  "overallStateModified": "2026-02-09T11:15:24.000Z",
+  "service": "syndication-pull-service"
+}

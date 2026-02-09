@@ -40,7 +40,9 @@ export class CodexProvider implements TriageProvider {
   }): Promise<ProviderResult> {
     const { runId, prompt, attachments, workingDir } = params;
     let capturedStdout = "";
-    const timeoutMs = Number(process.env.TRIAGE_PROVIDER_TIMEOUT_MS ?? 600_000);
+    const timeoutMs = Number(
+      process.env.TRIAGE_PROVIDER_TIMEOUT_MS ?? 1_200_000,
+    );
 
     console.log(
       `[${runId}] Codex provider timeout set to ${timeoutMs}ms (${timeoutMs / 1000}s)`,

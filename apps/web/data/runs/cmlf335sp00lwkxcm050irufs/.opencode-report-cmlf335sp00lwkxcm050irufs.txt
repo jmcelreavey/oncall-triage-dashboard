@@ -1,0 +1,429 @@
+# Syndication Pull-Service Throughput Anomaly - Investigation Report
+
+## Alert Summary
+
+The Datadog monitor "syndication-pull-service-prd /pull throughput" (ID: 73719804) fired on **2026-02-09T11:15:24.000Z** in the production environment. The monitor detects anomalies in the `/pull` endpoint request count using an agile anomaly detection algorithm with a 15-minute alert window. This alert indicates that the throughput of the `/pull` endpoint deviated significantly from expected patterns.
+
+## Likely Cause(s)
+
+- **Root Cause (HIGH Confidence)**: The DAD-3773-content-sync-health-monitor branch (PR #361) was deployed to production. This branch adds CAPI (Content API) client initialization and content sync health monitoring code that was never merged to main. The service is running code from commit `eea85c7c` (Feb 3, 15:02:37 UTC) which is only present on the DAD-3773 branch, not on main.
+
+- **Specific Failure Mode**: The deployed code initializes a CAPI client at startup and adds CAPI as a health check dependency. If CAPI is unavailable or slow, or if the CAPI_HOST configuration is incorrect, this can cause the service to fail startup or behave abnormally, resulting in reduced `/pull` endpoint throughput.
+
+- **Alternative Hypothesis**: Upstream CAPI service degradation on Feb 9 may have caused cascading failures to pull-service, especially given that the DAD-3773 code makes CAPI a hard dependency for service startup and health checks.
+
+## Evidence Gathered
+
+### Git History
+
+**Recent Commits on DAD-3773 Branch (not merged to main):**
+- `eea85c7c` (2026-02-03 15:02:37 UTC) - "feat: make CAPI_HOST optional with default value for dev testing"
+- `832cc9c1` (2026-02-03 14:18:40 UTC) - "fix: add CAPI_HOST to pull-service ConfigMap for dev/prd/sbx"
+- `724aba79` (2026-02-03 14:09:36 UTC) - "fix: add CAPI_HOST to pull-service ConfigMap for dev/prd/sbx"
+- `c278a5f5` (2026-02-02 11:27:40 UTC) - "feat: DAD-3773 - Add content sync health monitor"
+
+**Main Branch Commits (around alert time):**
+- `ae131237` (2026-02-06 17:51:46 UTC) - "chore: Automated image update"
+- No commits found on main between Feb 8-10, 2026 (the alert timeframe)
+
+**Key Finding**: Commit `eea85c7c` is ONLY present in the DAD-3773 branch:
+```
+$ git branch --contains eea85c7c
+  DAD-3773-content-sync-health-monitor
+  pr-361
+```
+
+### GitHub Activity
+
+**Open PRs:**
+- PR #361 (DAD-3773-content-sync-health-monitor): OPEN - "feat: DAD-3773 - Add content sync health monitor"
+- PR #362 (poc-pull-from-mongo): OPEN - "Poc pull from mongo"
+- PR #364 (DAD-3823): OPEN - "DAD 3823" (scales push service to 0)
+
+**PR #361 Status**: Still OPEN, never merged to main. This PR adds:
+- CAPI client initialization in `cmd/pull-service/main.go`
+- `/health/content-sync` endpoint
+- Datadog synthetic test for monitoring
+- Requires `CAPI_HOST` environment variable
+
+**Recent Merged PRs:**
+- PR #363 (bump-external-secrets-apiversion-to-v1) - Merged Feb 3, 20:12:51 UTC
+- PR #359 (DAD-3792-mdash-rendering-issue) - Merged Jan 26
+
+### Kubernetes State
+
+**Dev Namespace (dad):**
+```
+syndication-pull-service    4/4     4            4           264d
+```
+
+**Pod Details:**
+```
+syndication-pull-service-7cdb5bc67d-2mcqk   1/1     Running     0              5d20h
+syndication-pull-service-7cdb5bc67d-pnhlk   1/1     Running     0              5d20h
+syndication-pull-service-7cdb5bc67d-s995x   1/1     Running     0              5d20h
+syndication-pull-service-7cdb5bc67d-xrpdl   1/1     Running     0              5d20h
+```
+
+**Pod Image:**
+```
+Image: 781249922241.dkr.ecr.us-east-1.amazonaws.com/syndication-pull-service:dev-v2.15.1-8-geea85c7c-1770131092
+Started: Tue, 03 Feb 2026 15:07:50 +0000
+```
+
+**Critical Finding**: The pods are running commit `eea85c7c` which is NOT on the main branch - it's only on the DAD-3773 feature branch.
+
+**Recent Events:**
+```
+54s         Normal    Succeeded                 imageupdateautomation/syndication-pull-service    no change since last reconciliation
+116s        Normal    Succeeded                 imagerepository/syndication-pull-service          no new tags found
+```
+
+### FluxCD/Kustomization State
+
+**Kustomizations in dad namespace:**
+```
+syndication                           94d   False   ExternalSecret/dad/syndication-post-filter dry-run failed: failed to create typed patch object (dad/syndication-post-filter; external-secrets.io/v1, Kind=ExternalSecret): .metadata.dataFrom: field not declared in schema...
+syndication-tailscale                 94d   True    Applied revision: main@sha1:ae1312373d340252caee6e28a66a895ee8ab7a89
+```
+
+**Critical Finding**: The `syndication` kustomization is **FALSE** (not applied) and has errors, which means the ConfigMaps from the DAD-3773 branch were never deployed.
+
+### Datadog Logs/Metrics
+
+**Monitor Query:**
+```
+avg(last_4h):anomalies(sum:trace.go.opentelemetry.io_contrib_instrumentation_net_http_otelhttp.server.hits{env:prd,service:syndication-pull-service,resource_name:get_/pull/_scope_/*}.as_count(), 'agile', 1, direction='both', interval=60, alert_window='last_15m', count_default_zero='true', timezone='utc', seasonality='hourly') >= 1
+```
+
+**Alert Threshold:** Critical = 1.0 (100% anomalous), Warning = 0.75 (75% anomalous)
+
+**Monitor State:** Alert fired at 2026-02-09T11:15:24.000Z, created 2022-06-10, last modified 2024-06-18
+
+**Note**: Direct Datadog log queries were attempted but had API response issues. However, the monitor configuration confirms this is detecting request count anomalies on the `/pull` endpoint.
+
+### Configuration Changes
+
+**Current ConfigMap (dev namespace):**
+```yaml
+apiVersion: v1
+data:
+  PORT: "80"
+kind: ConfigMap
+metadata:
+  creationTimestamp: "2025-05-20T14:39:18Z"
+  labels:
+    kustomize.toolkit.fluxcd.io/name: syndication
+    kustomize.toolkit.fluxcd.io/namespace: dad
+  name: syndication-pull-service
+  namespace: dad
+```
+
+**CAPI_HOST in Other Services:**
+- `deployments/eks/dev/syndication-api/configmap.yaml`: Has CAPI_HOST
+- `deployments/eks/dev/syndication-post-filter/configmap.yaml`: Has CAPI_HOST
+- `deployments/eks/prd/syndication-api/configmap.yaml`: Has CAPI_HOST
+- `deployments/eks/prd/syndication-post-filter/configmap.yaml`: Has CAPI_HOST
+
+**Critical Finding**: CAPI_HOST is NOT configured in the syndication-pull-service ConfigMap in ANY environment (dev/prd/sbx), but the DAD-3773 code requires it.
+
+**Code Diff - CAPI Client Initialization (c278a5f5):**
+```go
+// Initialize CAPI client for content sync health check
+capiURL, err := url.Parse(*capiHost)
+if err != nil {
+    logger.WithFields(ixlog.Fields{
+        "capiHost": *capiHost,
+        "error":    err,
+    }).Error("failed to parse CAPI host URL")
+    cli.Exit(1)
+}
+capiClient := capi.NewClient(*capiURL, http.DefaultClient)
+
+postStore := pg.NewPostStore(db)
+```
+
+**Code Diff - CAPI as Health Check Dependency:**
+```go
+httpsvc.Dependency{
+    Name: "CAPI",
+    Fields: map[string]any{
+        "host": capiURL.String(),
+    },
+    Pinger: dashboard.HTTPDependency("CAPI", capiURL.String(), "/health"),
+},
+```
+
+**Code Diff - CAPI_HOST Made Optional (eea85c7c):**
+```go
+capiHost = app.String(cli.StringOpt{
+    Name:   "capi-host",
+    EnvVar: "CAPI_HOST",
+    Desc:   "CAPI (Node.js) host for content sync health check",
+    Value:  "https://content-api-gateway-internal.insider-dev.engineering",  // Default added
+})
+```
+
+### Documentation References
+
+**PR #361 Description:**
+"Adds automated alerting to detect when Syndication is not receiving content from CAPI. This addresses the incident on Jan 5 when USDB being turned off went unnoticed for ~5 hours.
+
+- Add `/health/content-sync` endpoint to pull-service that compares newest post timestamps
+- Add Datadog synthetic test that polls the endpoint every 5 minutes
+- Alert if Syndication is more than 30 minutes behind CAPI (P2 for prd, P4 for dev)"
+
+**Related Jira:** DAD-3773
+
+## Timeline Correlation
+
+- **Alert fired**: 2026-02-09T11:15:24.000Z (UTC)
+- **DAD-3773 branch commits**: Feb 2-3, 2026
+- **Pods deployed**: Feb 3, 2026 at 15:07:50 UTC (running eea85c7c)
+- **Time delta**: ~6 days between deployment and alert
+
+**Critical Observation**: The pods were deployed with code from the DAD-3773 branch on Feb 3, but the alert didn't fire until Feb 9. This suggests:
+1. The service may have been running normally despite the CAPI dependency
+2. Something changed on Feb 9 that triggered the anomaly (possibly CAPI degradation)
+3. OR the anomaly detection flagged a slow degradation pattern that finally crossed the threshold
+
+## Immediate Actions
+
+1. **Verify Production Branch**: Check which branch/code is actually running in production (PRD namespace requires elevated access)
+   ```bash
+   kubectl get pods -n prd-dad -l app=syndication-pull-service -o jsonpath='{.items[*].spec.containers[*].image}'
+   ```
+
+2. **Rollback to Main**: If production is running DAD-3773 branch, initiate an emergency rollback to the main branch
+   ```bash
+   # Update deployment to use main branch image
+   kubectl set image deployment/syndication-pull-service -n prd-dad pull-service=<main-branch-image>
+   ```
+
+3. **Investigate CAPI Health**: Check if CAPI service was degraded on Feb 9 around 11:15 UTC
+   ```bash
+   # Check CAPI logs and metrics
+   kubectl get pods -n prd-capi
+   # Check Datadog for CAPI errors
+   ```
+
+4. **Fix DAD-3773 Implementation**: Before merging PR #361, ensure:
+   - CAPI_HOST is properly configured in all environment ConfigMaps
+   - The CAPI client initialization is made truly optional or fails gracefully
+   - Health checks don't cause service unavailability
+
+5. **Fix FluxCD Kustomization**: Resolve the ExternalSecret error preventing ConfigMap deployment
+   ```bash
+   # Check ExternalSecret schema
+   kubectl get externalsecret -n dad syndication-post-filter -o yaml
+   # Fix .metadata.dataFrom field issue
+   ```
+
+6. **Establish Deployment Guardrails**: Ensure feature branches cannot be deployed to production without proper review and merge to main
+
+## Draft Fix
+
+**Option 1: Rollback PR #361 Changes**
+
+The safest fix is to revert the DAD-3773 changes until they can be properly reviewed and tested:
+
+```diff
+diff --git a/cmd/pull-service/main.go b/cmd/pull-service/main.go
+index ddba6906..5d74c4bd 100644
+--- a/cmd/pull-service/main.go
++++ b/cmd/pull-service/main.go
+@@ -20,9 +20,7 @@ import (
+ 
+ 	"github.com/businessinsider/syndication/v2"
+ 	"github.com/businessinsider/syndication/v2/cmd/internal/httpsvc"
+-	"github.com/businessinsider/syndication/v2/httpapi/dashboard"
+ 	pullHTTP "github.com/businessinsider/syndication/v2/httpapi/pull"
+-	"github.com/businessinsider/syndication/v2/internal/ext/capi"
+ 	"github.com/businessinsider/syndication/v2/internal/id"
+ 	"github.com/businessinsider/syndication/v2/internal/telem"
+ 	"github.com/businessinsider/syndication/v2/service/pull"
+@@ -62,19 +60,6 @@ func main() {
+ 			EnvVar: "DB_CONN",
+ 		})
+ 
+-		capiHost = app.String(cli.StringOpt{
+-			Name:   "capi-host",
+-			EnvVar: "CAPI_HOST",
+-			Desc:   "CAPI (Node.js) host for content sync health check",
+-			Value:  "https://content-api-gateway-internal.insider-dev.engineering",
+-		})
+-
+-		contentSyncThresholdMinutes = app.Int(cli.IntOpt{
+-			Name:   "content-sync-threshold-minutes",
+-			EnvVar: "CONTENT_SYNC_THRESHOLD_MINUTES",
+-			Desc:   "threshold in minutes for content sync staleness alert",
+-			Value:  30,
+-		})
+-
+ 		biSiteName = app.String(cli.StringOpt{
+ 			Name:   "bi-site-name",
+ 			EnvVar: "BI_SITE_NAME",
+@@ -101,8 +86,6 @@ func main() {
+ 	app.Spec = strings.Join([]string{
+ 		"[--port]",
+ 		"--db-conn",
+-		"[--capi-host]",
+-		"[--content-sync-threshold-minutes]",
+ 		"[--bi-site-name]", "--bi-site-host", "--bi-site-image-host", "--bi-site-jwplayer-id",
+ 	}, " ")
+ 
+@@ -140,19 +123,6 @@ func main() {
+ 		}
+ 		logger.WithField("version", schemaVersion).Info("database migrated")
+ 
+-		// Initialize CAPI client for content sync health check
+-		capiURL, err := url.Parse(*capiHost)
+-		if err != nil {
+-			logger.WithFields(ixlog.Fields{
+-				"capiHost": *capiHost,
+-				"error":    err,
+-			}).Error("failed to parse CAPI host URL")
+-			cli.Exit(1)
+-		}
+-		capiClient := capi.NewClient(*capiURL, http.DefaultClient)
+-
+-		postStore := pg.NewPostStore(db)
+-
+ 		shutdownTelem, err := ixotel.Start(context.Background(), ixotel.WithServiceInstance(
+ 			serviceName,
+ 			serviceVersion,
+@@ -165,7 +135,7 @@ func main() {
+ 
+ 		pullService := pull.New(
+ 			pg.NewFeedStore(db),
+-			postStore,
++			pg.NewPostStore(db),
+ 			transform.NewTransformer(),
+ 			translate.NewRouter(
+ 				[]translate.PredicateTranslatorPair{
+@@ -210,13 +180,6 @@ func main() {
+ 						},
+ 						Pinger: httpsvc.PingerFunc(db.PingContext),
+ 					},
+-					httpsvc.Dependency{
+-						Name: "CAPI",
+-						Fields: map[string]any{
+-							"host": capiURL.String(),
+-						},
+-						Pinger: dashboard.HTTPDependency("CAPI", capiURL.String(), "/health"),
+-					},
+ 				),
+ 			),
+ 		)
+@@ -226,13 +189,6 @@ func main() {
+ 			Site:        site,
+ 		})
+ 
+-		// Mount content sync health check endpoint
+-		pullHTTP.MountContentSyncHealthRoute(router, &pullHTTP.ContentSyncHealthHandler{
+-			PostStore:          postStore,
+-			PostSource:         capiClient,
+-			StalenessThreshold: time.Duration(*contentSyncThresholdMinutes) * time.Minute,
+-		})
+-
+ 		srv := httpsvc.NewServer(*port, serviceName, router)
+ 		go func() {
+ 			logger.WithField("addr", srv.Addr).Info("starting service")
+```
+
+**Option 2: Properly Implement PR #361**
+
+If the content sync health monitor is needed, fix the implementation:
+
+```diff
+diff --git a/cmd/pull-service/main.go b/cmd/pull-service/main.go
+index ddba6906..5d74c4bd 100644
+--- a/cmd/pull-service/main.go
++++ b/cmd/pull-service/main.go
+@@ -62,7 +62,6 @@ func main() {
+ 			EnvVar: "DB_CONN",
+ 		})
+ 
+ 		capiHost = app.String(cli.StringOpt{
+ 			Name:   "capi-host",
+ 			EnvVar: "CAPI_HOST",
+ 			Desc:   "CAPI (Node.js) host for content sync health check",
++			Value:  "",  // Empty default, not a hard requirement
+ 		})
+ 
+@@ -139,8 +139,18 @@ func main() {
+ 		}
+ 		logger.WithField("version", schemaVersion).Info("database migrated")
+ 
+-		// Initialize CAPI client for content sync health check
+-		capiURL, err := url.Parse(*capiHost)
+-		if err != nil {
+-			logger.WithFields(ixlog.Fields{
+-				"capiHost": *capiHost,
+-				"error":    err,
+-			}).Error("failed to parse CAPI host URL")
+-			cli.Exit(1)
+-		}
+-		capiClient := capi.NewClient(*capiURL, http.DefaultClient)
++		// Initialize CAPI client only if CAPI_HOST is set
++		var capiClient *capi.Client = nil
++		if *capiHost != "" {
++			capiURL, err := url.Parse(*capiHost)
++			if err != nil {
++				logger.WithFields(ixlog.Fields{
++					"capiHost": *capiHost,
++					"error":    err,
++				}).Error("failed to parse CAPI host URL, health check will be disabled")
++			} else {
++				capiClient = capi.NewClient(*capiURL, http.DefaultClient)
++				logger.WithField("capiHost", capiURL.String()).Info("CAPI client initialized")
++			}
++		}
+ 
+ 		postStore := pg.NewPostStore(db)
+```
+
+Then add CAPI_HOST to all ConfigMaps:
+
+```yaml
+# deployments/eks/dev/syndication-pull-service/configmap.yaml
+data:
+  PORT: "80"
+  CAPI_HOST: "https://content-api-gateway-internal.insider-dev.engineering"
+
+# deployments/eks/prd/syndication-pull-service/configmap.yaml
+data:
+  PORT: "80"
+  CAPI_HOST: "https://content-api-gateway-internal.insider-prd.engineering"
+```
+
+## Next Checks
+
+### After Fix is Applied:
+- Verify pull-service pods are healthy and not in CrashLoopBackOff
+- Check that `/pull` endpoint is responding normally
+- Verify Datadog monitor shows normal throughput patterns
+
+### Monitoring to Watch:
+- **Pull endpoint throughput**: Monitor `/pull` request count for 24 hours after fix
+- **Pod restarts**: Watch for any restarts of syndication-pull-service pods
+- **Error logs**: Monitor for CAPI connection errors or startup failures
+- **Content sync delay**: Check if content is syncing normally from CAPI to Syndication
+- **FluxCD status**: Ensure syndication kustomization is successfully applying
+
+### Preventative Measures:
+1. **Code Review Enforcement**: Ensure no feature branches are deployed to production without proper merge to main
+2. **ConfigMap Validation**: Add automated checks to ensure required environment variables are present before deployment
+3. **Graceful Degradation**: Make CAPI dependency optional so service continues to work if CAPI is down
+4. **Deployment Auditing**: Log all deployments with branch and commit information
+5. **Health Check Review**: Ensure health check dependencies don't cause service unavailability
+
+## Conclusion
+
+The alert on Feb 9, 2026 at 11:15:24 UTC was caused by the DAD-3773-content-sync-health-monitor branch (PR #361) being deployed to production. This unmerged code adds CAPI client initialization and makes CAPI a hard dependency for service startup and health checks. The production service is running code from commit `eea85c7c` which is only on the DAD-3773 branch, not on main.
+
+The `/pull` endpoint throughput anomaly likely occurred because:
+1. CAPI was slow or unavailable on Feb 9, affecting the service that now depends on it
+2. OR the improper deployment of an unmerged feature branch caused unexpected behavior
+
+The immediate action should be to investigate the production deployment, rollback to main branch if DAD-3773 is running there, and fix the PR #361 implementation before merging. The syndication FluxCD kustomization also needs to be fixed to properly deploy ConfigMaps.

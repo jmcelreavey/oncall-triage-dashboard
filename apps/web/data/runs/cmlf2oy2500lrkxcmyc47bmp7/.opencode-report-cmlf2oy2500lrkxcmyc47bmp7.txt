@@ -1,0 +1,85 @@
+# Syndication Pull Service - Anomalous /pull Throughput
+
+## Alert Summary
+
+Alert #73719804 fired on 2026-02-09T11:12:24.000Z detecting 75% anomalous throughput on the `/pull` endpoint of `syndication-pull-service-prd`. The monitor uses anomaly detection on OpenTelemetry HTTP server hits with a 4-hour rolling window and 15-minute alert window, configured for hourly seasonality.
+
+## Likely Cause(s)
+
+- **External traffic reduction or upstream dependency issue** (Medium confidence) - No recent code deployments, infrastructure changes, or configuration changes correlate with alert timing. The anomaly occurred 6 days after last production deployment.
+- **Alternative**: Database connectivity or performance degradation could be causing slow response times leading to reduced successful request handling
+
+## Evidence Gathered
+
+### Git History
+
+- Most recent PRD deployment: Commit `5b2c7e92` (2026-02-03T09:49:31Z) - Automated image update to `prd-v2.15.1-1770112080`
+- Alert fired: 2026-02-09T11:12:24.000Z (6 days after last deployment)
+- No code changes in main branch between Feb 3 and Feb 9 that could affect `/pull` endpoint
+- PR #361 "DAD-3773 - Add content sync health monitor" remains OPEN and is NOT on main branch
+- Commits `832cc9c1`, `724aba79`, `eea85c7c` (related to DAD-3773) are on `DAD-3773-content-sync-health-monitor` branch only, not merged to main
+
+### GitHub Activity
+
+- Open PRs affecting syndication:
+  - PR #361 (DAD-3773): OPEN since 2026-02-02 - Adds `/health/content-sync` endpoint requiring CAPI_HOST environment variable
+  - PR #362 (poc-pull-from-mongo): OPEN since 2026-02-02 - POC for pulling posts from MongoDB
+  - PR #363 (external-secrets bump): MERGED on 2026-02-03 - Only affected dev/sbx environments
+
+- Recent workflow runs show failed deployment attempts from DAD-3773 branch to dev environment (CrashLoopBackOff due to missing CAPI_HOST)
+- PRD deployment workflow run 21625263033 (2026-02-03T09:47:38Z) failed but used main branch reference
+
+### Kubernetes State
+
+Unable to query PRD namespace due to RBAC permissions. FluxCD image automation shows:
+- PRD deployments build from `main` branch only (configured in `deployments/eks/prd/syndication-pull-service/image-automation.yaml`)
+- Image: `781406854653.dkr.ecr.us-east-1.amazonaws.com/prd-syndication-pull-service:prd-v2.15.1-1770112080`
+- No manual deployments to PRD from feature branches detected in workflow history
+
+### Datadog Logs/Metrics
+
+- Unable to retrieve logs via API (authentication/connectivity issues)
+- Monitor query: `avg(last_4h):anomalies(sum:trace.go.opentelemetry.io_contrib_instrumentation_net_http_otelhttp.server.hits{env:prd,service:syndication-pull-service,resource_name:get_/pull/_scope_/*}.as_count(), 'agile', 1, direction='both', interval=60, alert_window='last_15m', count_default_zero='true', timezone='utc', seasonality='hourly') >= 1`
+- Monitor is currently in "Alert" state (overall_state_modified: 2026-02-09T11:15:24+00:00)
+
+### Configuration Changes
+
+- PRD external-secrets config still uses `apiVersion: external-secrets.io/v1beta1` (NOT updated to v1 like dev/sbx in PR #363)
+- PRD pull-service ConfigMap only contains `PORT: "80"` - does NOT include `CAPI_HOST`
+- CAPI Node client is enabled in PRD for `syndication-api` and `syndication-post-filter` (commit `83e21245`, 2026-01-26) but NOT configured for `syndication-pull-service`
+
+### Documentation References
+
+- No runbooks or incidents found in Confluence/Jira for this specific alert scenario
+- PR #361 description mentions it addresses incident from Jan 5 when USDB went unnoticed for ~5 hours
+- Related tickets: DAD-3773 (content sync health monitor), DAD-3768 (CAPI Node client migration)
+
+## Timeline Correlation
+
+- Alert fired: 2026-02-09T11:12:24.000Z
+- Last PRD deployment: 2026-02-03T09:49:31Z (commit `5b2c7e92`)
+- Time delta: 6 days, 1 hour, 23 minutes
+- No code changes between deployment and alert
+
+## Immediate Actions
+
+1. **Check Datadog metrics directly**: Access Datadog web UI to examine `/pull` endpoint request patterns around alert time (Feb 9 11:00-11:15 UTC)
+2. **Check pod status**: Verify syndication-pull-service pods in PRD are healthy (no restarts, CrashLoopBackOff, or resource issues)
+3. **Check database connectivity**: Verify PostgreSQL connections and query performance for syndication-pull-service
+4. **Check upstream dependencies**: Verify CAPI (if used) and database services are operating normally
+
+## Draft Fix
+
+Since no code or configuration change is identified as the root cause, the fix involves operational investigation rather than code changes:
+
+1. **Monitor for recovery**: The alert may recover automatically if this is a transient issue
+2. **Increase logging**: If issue persists, add debug logging to `/pull` endpoint handler to identify bottlenecks
+3. **Scale pods if needed**: If CPU/memory limits are being hit, consider increasing resources
+
+## Next Checks
+
+- Verify Datadog synthetic tests for `/pull` endpoint are passing
+- Check if any partner feeds showed errors during the alert period
+- Monitor for recurrence - if alert repeats, investigate deeper infrastructure/dependency health
+- Consider adding database query performance metrics to pull-service
+- Verify CAPI Node client health if pull-service has any dependency on CAPI

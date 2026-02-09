@@ -918,7 +918,7 @@ export class TriageService {
   private async failStaleRuns() {
     const timeoutMs = envNumber(
       "TRIAGE_RUN_TIMEOUT_MS",
-      envNumber("TRIAGE_PROVIDER_TIMEOUT_MS", 600_000) + 120_000,
+      envNumber("TRIAGE_PROVIDER_TIMEOUT_MS", 1_200_000) + 120_000,
     );
     const threshold = new Date(Date.now() - timeoutMs);
     const stale = await this.prisma.triageRun.findMany({
